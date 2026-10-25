@@ -1,0 +1,146 @@
+:root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#f3f1fb;background:#080a16;font-synthesis:none;text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;font-weight:400;--line:rgba(170,169,220,.14);--text:#f3f1fb;--accent:#a986ff;--accent-bright:#c3a7ff}
+*{box-sizing:border-box}body{min-width:320px;min-height:100vh;margin:0;background:#080a16}button,a{font:inherit}a{color:inherit}button:focus-visible,a:focus-visible,[tabindex="0"]:focus-visible,[tabindex="-1"]:focus-visible{outline:2px solid var(--accent-bright);outline-offset:4px}
+.icon-sprite{position:absolute;width:0;height:0;overflow:hidden}.app-shell{min-height:100vh}.sidebar{position:fixed;z-index:5;inset:0 auto 0 0;display:flex;width:244px;flex-direction:column;padding:27px 13px 18px;border-right:1px solid var(--line);background:linear-gradient(180deg,#0b0e1f,#0b0d1a)}
+.brand{display:flex;align-items:center;gap:12px;min-height:44px;margin:1px 16px 37px;color:var(--text);font-size:20px;font-weight:720;letter-spacing:-.65px;text-decoration:none}.brand-mark{width:30px;height:30px;fill:#a886ff;filter:drop-shadow(0 0 8px rgba(168,134,255,.5))}.brand-accent{color:#b98cff}
+.primary-nav{display:grid;gap:8px}.nav-link{display:flex;min-height:58px;align-items:center;gap:14px;padding:0 18px;border:1px solid transparent;border-radius:10px;color:#c2c5d8;font-size:14px;text-decoration:none;transition:background-color 160ms,color 160ms}.nav-link:hover{background:rgba(255,255,255,.045);color:var(--text)}.nav-link-current{border-color:rgba(170,129,255,.14);background:linear-gradient(100deg,rgba(127,75,200,.22),rgba(92,57,145,.14));color:#b795ff;font-weight:580}.nav-link-disabled{color:#aab0c5;cursor:default}.nav-icon{width:22px;height:22px;flex:0 0 22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.nav-icon-filled{fill:currentColor;stroke:currentColor}.external-mark{margin-left:auto;color:#8d91aa;font-size:15px}.sidebar-footer{display:flex;align-items:center;gap:11px;margin-top:auto;padding:15px 17px 4px;border-top:1px solid rgba(170,169,220,.08);color:#8f93ac;font-size:11px}.sidebar-footer span{color:var(--accent);font-size:14px}
+.main-content{min-height:100vh;margin-left:244px;background:#090c19}.hero{position:relative;display:flex;min-height:323px;align-items:center;overflow:hidden;padding:42px clamp(30px,4vw,56px);border-bottom:1px solid var(--line);background-color:#101225;background-image:linear-gradient(90deg,rgba(9,12,27,.78),rgba(9,12,27,.42) 42%,rgba(9,12,27,.03)),linear-gradient(0deg,rgba(9,12,27,.36),transparent 42%),url('./assets/images/overview-city-dusk.png');background-position:center,center,center 47%;background-size:cover}.hero-copy{position:relative;z-index:1;margin-top:29px}.hero h1{margin:0 0 8px;color:#f4f2fb;font-size:clamp(34px,3.3vw,46px);font-weight:650;letter-spacing:-1.7px;line-height:1.12;text-shadow:0 2px 16px rgba(5,7,19,.4)}.hero-description{margin:0;color:#d2d3e3;font-size:16px;line-height:1.55;text-shadow:0 2px 12px rgba(5,7,19,.7)}.hero-actions{position:absolute;z-index:2;top:26px;right:clamp(25px,3vw,47px);display:flex;align-items:center;gap:17px;color:#e4e3f1}.account-chevron{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.mobile-menu-toggle{display:none}
+.page-content{padding:25px clamp(21px,2vw,30px) 34px}.section-heading{display:flex;min-height:29px;align-items:center;justify-content:space-between;gap:20px;margin:0 0 13px}.week-heading{display:flex;align-items:baseline;gap:12px}.week-heading h2{margin:0;color:#f1eff9;font-size:19px;font-weight:600;letter-spacing:-.3px}.week-heading p{margin:0;color:#8e91ad;font-size:12px}.calendar-link{display:inline-flex;align-items:center;gap:10px;color:#b899ff;font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap}.calendar-link:hover{color:#d5c2ff}.calendar-link span{font-size:22px;line-height:.7}
+.week-scroll{max-width:100%;overflow-x:auto;overscroll-behavior-x:contain;border:1px solid rgba(160,164,204,.17);border-radius:11px;scrollbar-color:#51416e #111426;scrollbar-width:thin}.week-strip{display:grid;min-width:900px;grid-template-columns:repeat(7,minmax(0,1fr))}.week-day{display:block;min-width:0;min-height:160px;padding:20px 17px 15px;border-right:1px solid rgba(160,164,204,.12);background:rgba(11,14,29,.36);color:inherit;text-decoration:none}.week-day:last-child{border-right:0}.week-day-today{position:relative;z-index:1;border-radius:10px;outline:1px solid rgba(164,121,255,.72);background:linear-gradient(145deg,rgba(122,81,180,.23),rgba(79,57,124,.2));box-shadow:inset 0 1px 0 rgba(218,197,255,.08)}
+.day-heading{display:flex;flex-direction:column;gap:4px;margin-bottom:17px}.day-name{color:#edeaf7;font-size:12px;font-weight:650;text-transform:uppercase}.day-heading time{color:#b9bdd2;font-size:13px}.week-day-today .day-name,.week-day-today .day-heading time{color:#c1a3ff;font-weight:650}.day-events{display:grid;gap:12px}.day-event{display:flex;min-width:0;align-items:flex-start;gap:10px}.event-dot{width:12px;height:12px;flex:0 0 12px;margin-top:3px;border-radius:50%;background:#a884ff;box-shadow:0 0 8px rgba(168,132,255,.35)}.event-copy{display:grid;min-width:0;gap:5px}.event-title{overflow:hidden;color:#f0eef9;font-size:12px;font-weight:550;line-height:1.4;text-overflow:ellipsis}.event-time{color:#b8bad0;font-size:11px}.event-location{display:flex;align-items:center;gap:5px;overflow:hidden;color:#a9adc5;font-size:11px;text-overflow:ellipsis;white-space:nowrap}.event-location svg{width:13px;height:13px;flex:0 0 13px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}.day-empty{margin:22px 0 0;color:#9da1b8;font-size:11px;line-height:1.5}
+.week-status,.week-empty-note{display:flex;min-height:160px;align-items:center;justify-content:center;gap:11px;margin:0;padding:24px;border:1px solid rgba(160,164,204,.17);border-radius:11px;color:#b8bad0;font-size:13px;text-align:center}.week-empty-note{display:block;min-height:0;padding:0 0 10px;border:0;color:#9da1b8;text-align:left}.week-status-error{flex-direction:column}.week-status-error p{margin:0}.week-recovery-actions{display:flex;align-items:center;justify-content:center;gap:15px}.week-recovery-actions a,.week-recovery-actions button{padding:7px 10px;border:1px solid transparent;border-radius:7px;background:transparent;color:#c0a4ff;font-size:12px;text-decoration:none;cursor:pointer}.week-recovery-actions button:hover,.week-recovery-actions a:hover{background:rgba(172,138,255,.1)}.loading-indicator{width:14px;height:14px;border:2px solid rgba(190,172,238,.24);border-top-color:#b99aff;border-radius:50%;animation:spin 900ms linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+.skip-link{position:fixed;z-index:10;top:8px;left:8px;transform:translateY(-150%);padding:10px 14px;border-radius:8px;background:#291943;color:white}.skip-link:focus{transform:translateY(0)}.visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;clip-path:inset(50%)}.sidebar-backdrop{display:none}
+@media(max-width:1000px){.sidebar{width:224px}.main-content{margin-left:224px}.hero{min-height:290px}.week-heading{flex-direction:column;align-items:flex-start;gap:3px}.week-day{min-height:153px;padding:17px 13px}}
+@media(max-width:680px){.sidebar{z-index:8;width:min(285px,calc(100vw - 54px));transform:translateX(-102%);transition:transform 200ms}.sidebar-open{transform:translateX(0)}.sidebar-backdrop{position:fixed;z-index:7;inset:0;display:block;border:0;background:rgba(0,0,0,.66)}.main-content{margin-left:0}.hero{min-height:276px;align-items:flex-end;padding:30px 20px 31px;background-position:center,center,58% center}.hero-copy{margin-top:0}.hero h1{font-size:clamp(34px,10vw,42px)}.hero-description{max-width:290px;font-size:13px}.hero-actions{top:17px;right:18px;gap:10px}.account-chevron{display:none}.mobile-menu-toggle{position:absolute;z-index:3;top:17px;left:17px;display:grid;width:40px;height:40px;place-items:center;border:1px solid rgba(218,215,247,.2);border-radius:10px;background:rgba(10,12,28,.52);color:#f2efff;cursor:pointer;backdrop-filter:blur(8px)}.page-content{padding:22px 16px 28px}.section-heading{align-items:flex-start;margin-bottom:12px}.week-heading h2{font-size:18px}.week-heading p{font-size:11px}.calendar-link{gap:5px;font-size:11px}.week-strip{min-width:930px}.week-day{min-height:153px;padding:17px 14px}}
+@media(max-width:430px){.section-heading{flex-direction:column}.week-heading{flex-direction:row;align-items:baseline;gap:10px}.week-heading p{font-size:10px}.calendar-link{align-self:flex-end}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition-duration:.01ms!important;animation-duration:.01ms!important;animation-iteration-count:1!important}.loading-indicator{animation:none}}
+
+.week-hidden-message{display:flex;min-height:160px;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px;border:1px solid rgba(160,164,204,.17);border-radius:11px;color:#b8bad0;font-size:13px;text-align:center}
+.week-hidden-message a{color:#b899ff;font-weight:600;text-decoration:none}
+.week-hidden-message a:hover{color:#d5c2ff;text-decoration:underline}
+.settings-view{min-height:100vh;padding:42px clamp(24px,4vw,58px);background:#090c19}
+.settings-header{margin-bottom:35px}
+.settings-eyebrow{margin:0 0 9px;color:#a98ce8;font-size:10px;font-weight:700;letter-spacing:1.2px}
+.settings-header h1{margin:0 0 8px;color:#f3f1fb;font-size:30px;font-weight:620;letter-spacing:-.8px}
+.settings-header>p:last-child{margin:0;color:#aeb1c8;font-size:13px}
+.settings-group{max-width:850px}
+.settings-group h2{margin:0;padding:0 0 13px;color:#eceaf6;font-size:17px;font-weight:600}
+.preference-row{display:flex;min-height:82px;align-items:center;justify-content:space-between;gap:24px;padding:17px 0;border-top:1px solid rgba(170,169,220,.14);border-bottom:1px solid rgba(170,169,220,.14)}
+.preference-copy h3{margin:0 0 5px;color:#edeaf7;font-size:14px;font-weight:570}
+.preference-copy p{margin:0;color:#9fa3ba;font-size:12px;line-height:1.5}
+.switch-control{position:relative;display:inline-flex;width:52px;height:32px;flex:0 0 52px;align-items:center;cursor:pointer}
+.switch-control input{position:absolute;z-index:1;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer}
+.switch-track{position:relative;display:block;width:52px;height:30px;border:1px solid rgba(178,180,210,.27);border-radius:999px;background:#25283a;transition:background-color 150ms ease,border-color 150ms ease}
+.switch-track::after{position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#e5e2f0;box-shadow:0 1px 4px rgba(0,0,0,.28);content:'';transition:transform 150ms ease}
+.switch-control input:checked+.switch-track{border-color:#a986ff;background:#7650bb}
+.switch-control input:checked+.switch-track::after{transform:translateX(20px);background:#fff}
+.switch-control input:focus-visible+.switch-track{outline:2px solid var(--accent-bright);outline-offset:4px}
+@media(max-width:680px){.settings-view{padding:30px 19px}.settings-header{margin-bottom:27px}.settings-header h1{font-size:27px}.preference-row{gap:14px}.preference-copy p{max-width:260px}}
+@media(max-width:680px){.settings-view .mobile-menu-toggle{position:static;margin:0 0 18px}}
+
+/* ARCH-006: internal hub sections */
+.shell-menu-toggle{display:none}
+.content-view{min-height:100vh;padding:42px clamp(24px,4vw,58px);background:#090c19}
+.view-header{margin-bottom:32px}
+.view-header h1{margin:0 0 8px;color:#f3f1fb;font-size:30px;font-weight:620;letter-spacing:-.8px}
+.view-header>p:last-child{margin:0;color:#aeb1c8;font-size:13px}
+.month-calendar{max-width:960px;padding:20px;border:1px solid rgba(160,164,204,.17);border-radius:12px;background:rgba(11,14,29,.36)}
+.month-toolbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+.month-toolbar h2{margin:0;color:#f1eff9;font-size:18px;font-weight:600;text-transform:capitalize}
+.month-toolbar button{display:grid;width:36px;height:36px;place-items:center;border:1px solid var(--line);border-radius:8px;background:rgba(255,255,255,.035);color:#d5c8fa;font-size:25px;line-height:1;cursor:pointer}
+.month-toolbar button:hover{background:rgba(172,138,255,.12)}
+.month-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr))}
+.month-weekdays{padding-bottom:8px;border-bottom:1px solid var(--line);color:#aeb1c8;font-size:11px;font-weight:650;text-align:center;text-transform:uppercase}
+.month-day{display:flex;min-height:76px;align-items:flex-start;justify-content:flex-end;padding:10px;border-bottom:1px solid rgba(170,169,220,.08);color:#e8e6f2;font-size:13px}
+.month-day:not(:nth-child(7n)){border-right:1px solid rgba(170,169,220,.08)}
+.month-day-outside{color:#70758e}
+.month-day-today time{display:grid;width:27px;height:27px;place-items:center;border-radius:50%;background:#7650bb;color:#fff;font-weight:650}
+.empty-state{margin:18px 0 0;color:#aeb1c8;font-size:12px}
+.empty-panel{display:grid;min-height:220px;max-width:960px;place-content:center;justify-items:center;padding:28px;border:1px solid rgba(160,164,204,.17);border-radius:12px;background:rgba(11,14,29,.36);text-align:center}
+.empty-icon{color:#b899ff;font-size:26px}
+.empty-panel h2{margin:12px 0 6px;color:#f1eff9;font-size:17px;font-weight:600}
+.empty-panel p{margin:0;color:#aeb1c8;font-size:13px}
+@media(max-width:680px){
+  .shell-menu-toggle{position:fixed;z-index:6;top:16px;left:16px;display:grid;width:40px;height:40px;place-items:center;border:1px solid rgba(218,215,247,.2);border-radius:10px;background:rgba(10,12,28,.7);color:#f2efff;cursor:pointer;backdrop-filter:blur(8px)}
+  .content-view{padding:76px 19px 30px}
+  .view-header{margin-bottom:25px}
+  .view-header h1{font-size:27px}
+  .month-calendar{padding:12px}
+  .month-day{min-height:52px;padding:8px 6px;font-size:12px}
+}
+
+/* ARCH-008: skyline hero with the compact current-week strip integrated below it */
+.hero{
+  min-height:clamp(560px,calc(100vh - 42px),760px);
+  align-items:flex-end;
+  padding:clamp(28px,4vw,56px);
+  border-bottom:0;
+  background-color:#101225;
+  background-image:linear-gradient(180deg,rgba(9,12,27,.04) 0%,rgba(9,12,27,.08) 35%,rgba(9,12,27,.6) 68%,#090c19 100%),url('./assets/images/overview-city-dusk.png');
+  background-position:center,center 48%;
+  background-size:cover;
+}
+.hero-layout{width:100%;max-width:1360px;margin:0 auto}
+.hero-copy{margin:0 0 clamp(20px,4vh,38px)}
+.hero h1{font-size:clamp(38px,4vw,52px)}
+.weekly-section{padding:16px 18px 13px;border:1px solid rgba(214,201,255,.17);border-radius:13px;background:rgba(8,10,25,.62);box-shadow:0 16px 42px rgba(3,5,17,.18);backdrop-filter:blur(14px)}
+.section-heading{min-height:0;align-items:baseline;margin:0 0 8px}
+.week-heading{flex-direction:row;align-items:baseline;gap:10px}
+.week-heading h2{font-size:15px}
+.week-heading p{font-size:11px}
+.week-scroll{border:0;border-radius:0;background:transparent;scrollbar-color:#51416e transparent}
+.week-strip{min-width:0;grid-template-columns:repeat(7,minmax(0,1fr))}
+.week-day{min-height:0;padding:10px 8px;border-right:1px solid rgba(210,204,240,.13);background:transparent;text-align:center;transition:background-color 150ms ease}
+.week-day:hover{background:rgba(193,169,255,.09)}
+.week-day-today{border-radius:8px;outline:1px solid rgba(188,151,255,.72);background:rgba(140,98,213,.2);box-shadow:none}
+.day-heading{align-items:center;gap:4px;margin:0}
+.day-name{font-size:11px}
+.day-heading time{font-size:12px}
+.week-empty-note{margin:8px 0 0;padding:8px 0 0;border-top:1px solid rgba(210,204,240,.1);color:#b9bbcf;font-size:11px}
+.week-hidden-message{min-height:76px;border-color:rgba(210,204,240,.13);background:rgba(8,10,25,.34)}
+@media(max-width:1000px){
+  .week-heading{flex-direction:row;align-items:baseline;gap:8px}
+  .week-strip{min-width:640px}
+}
+@media(max-width:680px){
+  .hero{min-height:100vh;min-height:100svh;align-items:flex-end;padding:78px 16px 18px;background-position:center,center,58% center}
+  .hero-copy{margin:0 0 20px}
+  .hero h1{font-size:clamp(36px,10vw,46px)}
+  .hero-description{max-width:320px;font-size:13px}
+  .weekly-section{padding:13px 12px 11px}
+  .section-heading{flex-direction:row;align-items:baseline;gap:8px;margin-bottom:7px}
+  .week-heading{flex-direction:column;align-items:flex-start;gap:2px}
+  .week-heading h2{font-size:14px}
+  .week-heading p{font-size:10px}
+  .calendar-link{gap:4px;font-size:10px}
+  .week-strip{min-width:640px}
+  .week-day{padding:10px 6px}
+  .week-empty-note{font-size:10px}
+}
+.hero-notifications{position:absolute;top:24px;right:clamp(26px,4vw,56px);z-index:2;display:grid;width:42px;height:42px;place-items:center;border:1px solid rgba(218,215,247,.2);border-radius:50%;background:rgba(12,14,34,.42);color:#f2efff;backdrop-filter:blur(8px);transition:background-color 150ms ease}
+.hero-notifications:hover{background:rgba(141,103,205,.36)}
+@media(max-width:680px){.hero-notifications{top:18px;right:18px;width:40px;height:40px}}
+
+
+
+/* ARCH-010: equal weekday cards and selectable calendar dates */
+.week-day{display:grid;min-height:116px;grid-template-rows:auto 1fr;justify-items:center;align-items:start;padding:13px 8px 10px}
+.day-heading{display:grid;justify-items:center;gap:3px;margin:0}
+.day-name{text-transform:uppercase}
+.day-number{display:block;color:#f4f2fb;font-size:25px;font-weight:650;letter-spacing:-.7px;line-height:1.05}
+.week-day-today .day-number{color:#d6c1ff}
+.day-item-placeholder{align-self:center;margin-top:5px;color:rgba(206,202,226,.52);font-size:17px;line-height:1}
+.month-toolbar .month-today-button{width:auto;height:34px;padding:0 12px;border-radius:8px;font-size:12px}
+.month-day{width:100%;border:0;border-bottom:1px solid rgba(170,169,220,.08);background:transparent;font:inherit;text-align:center;appearance:none;cursor:pointer;transition:background-color 140ms ease,color 140ms ease}
+.month-day:hover{background:rgba(164,121,255,.1);color:#fff}
+.month-day-selected{position:relative;z-index:1;outline:2px solid rgba(189,151,255,.86);outline-offset:-3px;background:rgba(132,91,193,.2);color:#f8f4ff}
+.month-day-selected time{font-weight:700}
+.month-day-today.month-day-selected time{background:#9670d1}
+@media(max-width:680px){
+  .week-day{min-height:105px;padding:12px 6px 9px}
+  .day-number{font-size:23px}
+  .month-toolbar{gap:6px}
+  .month-toolbar h2{flex:1;text-align:center;font-size:15px}
+  .month-toolbar button{width:32px;height:32px}
+  .month-toolbar .month-today-button{width:auto;height:32px;padding:0 8px;font-size:11px}
+}
+
