@@ -1,0 +1,53 @@
+name: hub
+
+services:
+  backend:
+    image: hub-backend:local
+    build:
+      context: ./back
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      SERVER_PORT: "8080"
+      SERVER_ADDRESS: "0.0.0.0"
+      SPRING_DATASOURCE_URL: "jdbc:h2:file:/data/hub;DB_CLOSE_ON_EXIT=FALSE"
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.h2.Driver
+      SPRING_DATASOURCE_USERNAME: sa
+      SPRING_DATASOURCE_PASSWORD: ""
+      SPRING_JPA_HIBERNATE_DDL_AUTO: none
+      SPRING_JPA_OPEN_IN_VIEW: "false"
+      SPRING_H2_CONSOLE_ENABLED: "false"
+      SPRING_SQL_INIT_MODE: always
+      HUB_GOOGLE_OAUTH_CLIENT_ID: ${HUB_GOOGLE_OAUTH_CLIENT_ID:-}
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
+    volumes:
+      - hub_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:8080/api/tasks >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 45s
+
+  frontend:
+    image: hub-frontend:local
+    build:
+      context: ./front
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-8081}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  hub_data:
+    name: hub_data
