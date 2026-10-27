@@ -12,6 +12,18 @@ O Hub combina uma interface Vue com uma API Spring Boot. As tasks locais são sa
 
 Alterne entre as visualizações diária, semanal, mensal e anual. Cada uma oferece apresentações próprias, e as configurações permitem escolher qual apresentação abrir por padrão. Clique em uma data ou horário para iniciar uma task com esses dados preenchidos.
 
+Capturas reais com tarefas de demonstração:
+
+| Dia | Semana |
+| --- | --- |
+| [![Calendário diário](docs/screenshots/calendar-day.png)](docs/screenshots/calendar-day.png) | [![Calendário semanal](docs/screenshots/calendar-week.png)](docs/screenshots/calendar-week.png) |
+
+| Mês | Ano |
+| --- | --- |
+| [![Calendário mensal](docs/screenshots/calendar-month.png)](docs/screenshots/calendar-month.png) | [![Calendário anual](docs/screenshots/calendar-year.png)](docs/screenshots/calendar-year.png) |
+
+Mockups de referência (não são capturas do app):
+
 | Dia | Semana |
 | --- | --- |
 | ![Mockup de referência do calendário diário](front/design-reference/calendar/calendar-day.png) | ![Mockup de referência do calendário semanal](front/design-reference/calendar/calendar-week.png) |
@@ -20,7 +32,17 @@ Alterne entre as visualizações diária, semanal, mensal e anual. Cada uma ofer
 | --- | --- |
 | ![Mockup de referência do calendário mensal](front/design-reference/calendar/calendar-month.png) | ![Mockup de referência do calendário anual](front/design-reference/calendar/calendar-year.png) |
 
-As imagens acima são mockups de referência incluídos no projeto.
+### Outras telas
+
+Capturas reais com dados de demonstração:
+
+| Visão Geral | Notificações |
+| --- | --- |
+| [![Visão Geral](docs/screenshots/overview.png)](docs/screenshots/overview.png) | [![Notificações](docs/screenshots/notifications.png)](docs/screenshots/notifications.png) |
+
+| Configurações | Ferramentas |
+| --- | --- |
+| [![Configurações](docs/screenshots/settings.png)](docs/screenshots/settings.png) | [![Ferramentas para baixar vídeos](docs/screenshots/tools.png)](docs/screenshots/tools.png) |
 
 ### Recursos
 

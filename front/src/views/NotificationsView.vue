@@ -6,7 +6,7 @@ import { useTaskHub } from '../services/taskHub'
 import ContextMenu from '../components/ContextMenu.vue'
 
 const router = useRouter()
-const { state, updateTask, refreshTasks } = useTaskHub()
+const { state, updateTask, refreshTasks, deleteTask } = useTaskHub()
 const selectedId = ref('')
 const activeFilter = ref('all')
 const search = ref('')
@@ -46,6 +46,7 @@ const contextMenuItems = [
   { id: 'details', label: 'Ver detalhes' },
   { id: 'calendar', label: 'Abrir no calendário' },
   { id: 'complete', label: 'Concluir task' },
+  { id: 'delete', label: 'Excluir task', danger: true },
 ]
 
 function normalize(value) {
@@ -151,6 +152,26 @@ async function selectContextAction(action) {
     const focusTarget = notificationList.value?.querySelector('.notification-row[aria-current="true"]')
       || document.querySelector('.notification-refresh')
     focusTarget?.focus()
+  } else if (action === 'delete') {
+    const task = context.task
+    if (!window.confirm(`Excluir “${task.title}”? Essa ação não pode ser desfeita.`)) {
+      context.target?.focus?.()
+      return
+    }
+    actionError.value = ''
+    try {
+      await deleteTask(task)
+      selectedId.value = ''
+      await nextTick()
+      const focusTarget = notificationList.value?.querySelector('.notification-row[aria-current="true"]')
+        || document.querySelector('.notification-refresh')
+      focusTarget?.focus()
+    } catch (error) {
+      actionError.value = error.message
+      selectedId.value = task.id
+      await nextTick()
+      notificationDetailTitle.value?.focus()
+    }
   }
 }
 </script>

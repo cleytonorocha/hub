@@ -66,6 +66,11 @@ async function updateTask(task, changes) {
   return updated
 }
 
+async function deleteTask(task) {
+  await request(`/api/tasks/${encodeURIComponent(task.id)}`, { method: 'DELETE' })
+  state.tasks = state.tasks.filter((item) => item.id !== task.id)
+}
+
 export function useTaskHub() {
-  return { state, initialize, refreshTasks, createTask, updateTask }
+  return { state, initialize, refreshTasks, createTask, updateTask, deleteTask }
 }

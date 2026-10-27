@@ -15,7 +15,7 @@ import { useTaskHub } from '../services/taskHub'
 
 const route = useRoute()
 const router = useRouter()
-const { state: taskState, refreshTasks, updateTask } = useTaskHub()
+const { state: taskState, refreshTasks, updateTask, deleteTask } = useTaskHub()
 const composerOpen = ref(false)
 const composerDate = ref('')
 const composerTime = ref('')
@@ -105,6 +105,7 @@ const contextMenuItems = computed(() => {
   return [
     { id: 'details', label: 'Abrir detalhes' },
     { id: 'toggle', label: task.completed ? 'Reabrir task' : 'Concluir task' },
+    { id: 'delete', label: 'Excluir task', danger: true },
   ]
 })
 
@@ -225,6 +226,25 @@ async function selectContextAction(action) {
     } catch (error) {
       taskError.value = error.message
       openTask(task, { currentTarget: context.target })
+    }
+  } else if (context.kind === 'task' && action === 'delete') {
+    const task = context.task
+    if (!window.confirm(`Excluir “${task.title}”? Essa ação não pode ser desfeita.`)) {
+      context.target?.focus?.()
+      return
+    }
+    const row = context.target?.closest?.('li')
+    const nextFocusTarget = row?.nextElementSibling?.querySelector?.('button')
+      || row?.previousElementSibling?.querySelector?.('button')
+    taskError.value = ''
+    try {
+      await deleteTask(task)
+      if (selectedTask.value?.id === task.id) selectedTask.value = null
+      await nextTick()
+      ;(nextFocusTarget?.isConnected ? nextFocusTarget : document.getElementById('calendar-title'))?.focus?.()
+    } catch (error) {
+      openTask(task, { currentTarget: context.target })
+      taskError.value = error.message
     }
   }
 }
@@ -433,7 +453,7 @@ function handleModeKeydown(event) {
 <template>
   <section class="content-view calendar-view" aria-labelledby="calendar-title">
     <header class="view-header calendar-page-header">
-      <div><p class="settings-eyebrow">CALENDÁRIO</p><h1 id="calendar-title">Calendário</h1><p>Escolha uma visão diária, semanal, mensal ou anual.</p></div>
+      <div><p class="settings-eyebrow">CALENDÁRIO</p><h1 id="calendar-title" tabindex="-1">Calendário</h1><p>Escolha uma visão diária, semanal, mensal ou anual.</p></div>
     </header>
 
     <section id="page-content" class="calendar-workspace" aria-label="Navegação do calendário">

@@ -87,7 +87,7 @@ onBeforeUnmount(() => {
 <template>
   <Teleport to="body">
     <div v-if="open" ref="menu" class="app-context-menu" :style="style" role="menu" aria-label="Ações do contexto" @keydown="handleKeydown">
-      <button v-for="item in items" :key="item.id" type="button" role="menuitem" tabindex="0" :disabled="item.disabled" @click="emit('select', item.id)">{{ item.label }}</button>
+      <button v-for="item in items" :key="item.id" type="button" role="menuitem" tabindex="0" :class="{ 'context-menu-item-danger': item.danger }" :disabled="item.disabled" @click="emit('select', item.id)">{{ item.label }}</button>
     </div>
   </Teleport>
 </template>

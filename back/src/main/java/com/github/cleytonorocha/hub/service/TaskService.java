@@ -25,4 +25,9 @@ public class TaskService {
 		task.update(request.dueDate(), request.dueTime(), request.completed(), request.category(), request.color(), request.priority(), request.notes());
 		return tasks.save(task);
 	}
+
+	public void delete(String id) {
+		Task task = tasks.findById(id).orElseThrow(() -> new TaskNotFoundException(id));
+		tasks.delete(task);
+	}
 }
