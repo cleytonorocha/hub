@@ -52,9 +52,9 @@ button:focus-visible, a:focus-visible, [tabindex="0"]:focus-visible, [tabindex="
   text-decoration: none;
 }
 .brand-mark { width: 30px; height: 30px; fill: #a886ff; filter: drop-shadow(0 0 8px rgba(168, 134, 255, .5)); }
-.sidebar-collapse-toggle { position: absolute; z-index: 6; top: 12px; right: -13px; display: grid; width: 26px; height: 26px; place-items: center; border: 1px solid rgba(170, 169, 220, .22); border-radius: 50%; background: #111426; color: #aeb1c8; box-shadow: 0 3px 10px rgba(0, 0, 0, .28); cursor: pointer; transition: border-color 150ms, background-color 150ms, color 150ms, box-shadow 150ms; }
-.sidebar-collapse-toggle:hover { border-color: rgba(170, 129, 255, .6); background: #211a35; color: #d4c2ff; box-shadow: 0 4px 14px rgba(0, 0, 0, .4); }
-.sidebar-collapse-toggle svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.sidebar-pin-toggle { position: absolute; z-index: 6; top: 12px; right: -13px; display: grid; width: 26px; height: 26px; place-items: center; border: 1px solid rgba(170, 169, 220, .22); border-radius: 50%; background: #111426; color: #aeb1c8; box-shadow: 0 3px 10px rgba(0, 0, 0, .28); cursor: pointer; transition: border-color 150ms, background-color 150ms, color 150ms, box-shadow 150ms; }
+.sidebar-pin-toggle:hover, .sidebar-pin-toggle[aria-pressed="true"] { border-color: rgba(170, 129, 255, .6); background: #211a35; color: #d4c2ff; box-shadow: 0 4px 14px rgba(0, 0, 0, .4); }
+.sidebar-pin-toggle svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .primary-nav { display: grid; gap: 4px; }
 .nav-link {
   display: flex;
@@ -414,7 +414,7 @@ button:focus-visible, a:focus-visible, [tabindex="0"]:focus-visible, [tabindex="
   .app-shell.sidebar-collapsed .nav-link { justify-content: flex-start; gap: 14px; padding: 0 18px; }
   .app-shell.sidebar-collapsed .nav-group-chevron { display: block; }
   .app-shell.sidebar-collapsed .nav-group-children { margin-left: 29px; padding-left: 9px; border-left: 1px solid var(--line); }
-  .sidebar-collapse-toggle { display: none; }
+  .sidebar-pin-toggle { display: none; }
   .sidebar-open { transform: translateX(0); }
   .sidebar-backdrop { position: fixed; z-index: 7; inset: 0; display: block; border: 0; background: rgba(0, 0, 0, .66); }
   .main-content { margin-left: 0; }

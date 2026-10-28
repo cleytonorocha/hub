@@ -28,8 +28,8 @@ const composerTrigger = ref(null)
 const detailTrigger = ref(null)
 const contextMenu = ref(null)
 const modes = [
-  { id: 'week', label: 'Semana' },
   { id: 'day', label: 'Dia' },
+  { id: 'week', label: 'Semana' },
   { id: 'month', label: 'Mês' },
   { id: 'year', label: 'Ano' },
 ]

@@ -1,10 +1,14 @@
 <script setup>
 import { RouterLink, RouterView, useRoute } from 'vue-router'
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useTaskHub } from './services/taskHub'
 
 const menuOpen = ref(false)
-const sidebarCollapsed = ref(localStorage.getItem('hub-sidebar-collapsed') === 'true')
+const storedSidebarPinned = localStorage.getItem('hub-sidebar-pinned')
+const wasSidebarExpanded = localStorage.getItem('hub-sidebar-collapsed') === 'false'
+const sidebarPinned = ref(storedSidebarPinned === 'true' || (storedSidebarPinned === null && wasSidebarExpanded))
+const sidebarHovered = ref(false)
+const sidebarCollapsed = computed(() => !sidebarPinned.value && !sidebarHovered.value)
 const toolsOpen = ref(false)
 const route = useRoute()
 const { initialize } = useTaskHub()
@@ -14,9 +18,9 @@ watch(() => route.path, (path) => {
   if (path.startsWith('/tools/')) toolsOpen.value = true
 }, { immediate: true })
 
-function toggleSidebar() {
-  sidebarCollapsed.value = !sidebarCollapsed.value
-  localStorage.setItem('hub-sidebar-collapsed', String(sidebarCollapsed.value))
+function toggleSidebarPin() {
+  sidebarPinned.value = !sidebarPinned.value
+  localStorage.setItem('hub-sidebar-pinned', String(sidebarPinned.value))
 }
 
 const navigation = [
@@ -35,19 +39,18 @@ const navigation = [
     <symbol id="icon-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></symbol>
     <symbol id="icon-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></symbol>
     <symbol id="icon-settings" viewBox="0 0 24 24"><path d="M4 21v-7m0-4V3M12 21v-9m0-4V3m8 18v-5m0-4V3" /><path d="M2 14h4m4-6h4m4 8h4" /></symbol>
-    <symbol id="icon-sidebar-collapse" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16m9-11-3 3 3 3" /></symbol>
-    <symbol id="icon-sidebar-expand" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16m3-11 3 3-3 3" /></symbol>
+    <symbol id="icon-sidebar-pin" viewBox="0 0 24 24"><path d="m16 3 5 5-4 1-4 4v4l-2-2-5 5 2-7-2-2 4-2 1-4Z" /><path d="m11 13-7 7" /></symbol>
   </svg>
   <div class="app-shell" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
     <button v-if="menuOpen" class="sidebar-backdrop" type="button" aria-label="Fechar menu" @click="menuOpen = false"></button>
-    <aside id="main-navigation" class="sidebar" :class="{ 'sidebar-open': menuOpen }">
+    <aside id="main-navigation" class="sidebar" :class="{ 'sidebar-open': menuOpen }" @mouseenter="sidebarHovered = true" @mouseleave="sidebarHovered = false">
       <div class="sidebar-header">
       <RouterLink class="brand" to="/" aria-label="Hub — página inicial" @click="menuOpen = false">
         <svg class="brand-mark" viewBox="0 0 36 36" aria-hidden="true"><path d="M18 2 25 9 18 16 11 9 18 2Zm11 11 5 5-5 5-5-5 5-5ZM7 13l5 5-5 5-5-5 5-5Zm11 7 7 7-7 7-7-7 7-7Z" /></svg>
         <span class="brand-name">Hub</span>
       </RouterLink>
-      <button class="sidebar-collapse-toggle" type="button" aria-controls="main-navigation" :aria-expanded="!sidebarCollapsed" :aria-label="sidebarCollapsed ? 'Expandir barra lateral' : 'Recolher barra lateral'" :title="sidebarCollapsed ? 'Expandir barra lateral' : 'Recolher barra lateral'" @click="toggleSidebar">
-        <svg aria-hidden="true"><use :href="sidebarCollapsed ? '#icon-sidebar-expand' : '#icon-sidebar-collapse'" /></svg>
+      <button class="sidebar-pin-toggle" type="button" aria-controls="main-navigation" :aria-pressed="sidebarPinned" :aria-label="sidebarPinned ? 'Desafixar barra lateral' : 'Fixar barra lateral'" :title="sidebarPinned ? 'Desafixar barra lateral' : 'Fixar barra lateral'" @click="toggleSidebarPin">
+        <svg aria-hidden="true"><use href="#icon-sidebar-pin" /></svg>
       </button>
       </div>
       <nav aria-label="Navegação principal" class="primary-nav">
