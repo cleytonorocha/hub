@@ -1,3 +1,5 @@
+import { namespacedKey } from '../services/auth'
+
 export const CALENDAR_MODES = [
   { id: 'day', label: 'Dia' },
   { id: 'week', label: 'Semana' },
@@ -52,7 +54,7 @@ export function normalizeCalendarPresentations(value = {}) {
 
 export function readCalendarPresentationPreferences() {
   try {
-    const stored = window.localStorage.getItem(CALENDAR_PRESENTATIONS_KEY)
+    const stored = window.localStorage.getItem(namespacedKey(CALENDAR_PRESENTATIONS_KEY))
     return stored ? normalizeCalendarPresentations(JSON.parse(stored)) : normalizeCalendarPresentations()
   } catch {
     return normalizeCalendarPresentations()
@@ -61,6 +63,6 @@ export function readCalendarPresentationPreferences() {
 
 export function writeCalendarPresentationPreferences(value) {
   const normalized = normalizeCalendarPresentations(value)
-  try { window.localStorage.setItem(CALENDAR_PRESENTATIONS_KEY, JSON.stringify(normalized)) } catch { /* Keep the current session preference. */ }
+  try { window.localStorage.setItem(namespacedKey(CALENDAR_PRESENTATIONS_KEY), JSON.stringify(normalized)) } catch { /* Keep the current session preference. */ }
   return normalized
 }

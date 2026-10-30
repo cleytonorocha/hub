@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 @RestController
 @RequestMapping("/api/tasks")
@@ -35,9 +36,11 @@ public class TaskController {
 	}
 
 	@GetMapping
+	@PreAuthorize("hasAuthority('TASK_READ')")
 	public List<Task> list() { return tasks.list(); }
 
 	@GetMapping("/search")
+	@PreAuthorize("hasAuthority('TASK_READ')")
 	public TaskSearchResponse search(
 			@RequestParam(defaultValue = "") String q,
 			@RequestParam(defaultValue = "all") String status,
@@ -79,17 +82,20 @@ public class TaskController {
 	}
 
 	@PostMapping
+	@PreAuthorize("hasAuthority('TASK_WRITE')")
 	@ResponseStatus(HttpStatus.CREATED)
 	public Task create(@Valid @RequestBody CreateTaskRequest request) {
 		return tasks.create(request);
 	}
 
 	@PatchMapping("/{id}")
+	@PreAuthorize("hasAuthority('TASK_WRITE')")
 	public Task update(@PathVariable String id, @Valid @RequestBody UpdateTaskRequest request) {
 		return tasks.update(id, request);
 	}
 
 	@DeleteMapping("/{id}")
+	@PreAuthorize("hasAuthority('TASK_DELETE')")
 	@ResponseStatus(HttpStatus.NO_CONTENT)
 	public void delete(@PathVariable String id) {
 		tasks.delete(id);

@@ -1,6 +1,15 @@
 import { reactive } from 'vue'
 
 const state = reactive({ tasks: [], loading: true, refreshing: false, error: '' })
+let accountGeneration = 0
+
+export function resetTaskHub() {
+  accountGeneration += 1
+  state.tasks = []
+  state.loading = true
+  state.refreshing = false
+  state.error = ''
+}
 
 async function request(path, options = {}) {
   let response
@@ -26,32 +35,37 @@ async function request(path, options = {}) {
 
 async function refreshTasks() {
   if (state.refreshing) return state.tasks
+  const generation = accountGeneration
   state.refreshing = true
   state.error = ''
   try {
-    state.tasks = await request('/api/tasks')
+    const tasks = await request('/api/tasks')
+    if (generation === accountGeneration) state.tasks = tasks
     return state.tasks
   } catch (error) {
-    state.error = error.message
+    if (generation === accountGeneration) state.error = error.message
     throw error
   } finally {
-    state.refreshing = false
+    if (generation === accountGeneration) state.refreshing = false
   }
 }
 
 async function initialize() {
+  const generation = accountGeneration
   state.loading = true
   try { await refreshTasks() } catch { /* Keep the error visible in the calendar. */ }
-  finally { state.loading = false }
+  finally { if (generation === accountGeneration) state.loading = false }
 }
 
 async function createTask(task) {
+  const generation = accountGeneration
   const created = await request('/api/tasks', { method: 'POST', body: JSON.stringify(task) })
-  state.tasks.push(created)
+  if (generation === accountGeneration) state.tasks.push(created)
   return created
 }
 
 async function updateTask(task, changes) {
+  const generation = accountGeneration
   const updated = await request(`/api/tasks/${encodeURIComponent(task.id)}`, {
     method: 'PATCH',
     body: JSON.stringify({
@@ -65,14 +79,17 @@ async function updateTask(task, changes) {
       notes: changes.notes,
     }),
   })
-  const index = state.tasks.findIndex((item) => item.id === updated.id)
-  if (index >= 0) state.tasks.splice(index, 1, updated)
+  if (generation === accountGeneration) {
+    const index = state.tasks.findIndex((item) => item.id === updated.id)
+    if (index >= 0) state.tasks.splice(index, 1, updated)
+  }
   return updated
 }
 
 async function deleteTask(task) {
+  const generation = accountGeneration
   await request(`/api/tasks/${encodeURIComponent(task.id)}`, { method: 'DELETE' })
-  state.tasks = state.tasks.filter((item) => item.id !== task.id)
+  if (generation === accountGeneration) state.tasks = state.tasks.filter((item) => item.id !== task.id)
 }
 
 async function searchTasks(criteria) {
@@ -84,8 +101,9 @@ async function searchTasks(criteria) {
 }
 
 async function createTaskSeries(series) {
+  const generation = accountGeneration
   const created = await request('/api/task-series', { method: 'POST', body: JSON.stringify(series) })
-  state.tasks.push(...created.occurrences)
+  if (generation === accountGeneration) state.tasks.push(...created.occurrences)
   return created
 }
 

@@ -58,6 +58,14 @@ Capturas atuais da aplicação no navegador (30/10/2026):
 - **Baixar vídeos:** tela inicial com seleção de plataforma e validação local do formato e domínio do link. A integração de download ainda não está implementada.
 - **Layout adaptável:** navegação lateral que pode ser recolhida e interface ajustada para telas menores.
 
+### Contas e permissões
+
+Na primeira abertura, a instalação apresenta um assistente local para criar a conta Administrador. O assistente encerra após a criação e atribui a essa conta os registros e capas que já existiam. Não há usuário nem senha padrão. Depois, o Administrador cria contas e perfis nomeados com permissões para tarefas, biblioteca, configurações e ferramentas. Os registros pessoais e as cópias portáteis pertencem à conta autenticada.
+
+O login usa sessão do servidor, cookie HttpOnly, proteção CSRF e limite de tentativas. O Compose publica a interface e a API somente em `127.0.0.1`; o backend executado fora do Docker também usa bind local. **O primeiro setup sem token só está aprovado para esse acesso local. Não publique o app em LAN ou na internet**; uma implantação remota precisa desativar o setup aberto e definir um mecanismo administrativo de bootstrap seguro antes de expor a aplicação.
+
+A integração Google Tasks permanece indisponível nesta versão multiusuário porque o estado e as credenciais antigos ainda não têm isolamento funcional por conta. Os dados existentes são preservados e associados ao Administrador inicial.
+
 ## Tecnologias
 
 | Camada | Tecnologias |
@@ -135,7 +143,7 @@ docker compose down
 - A API local usa `127.0.0.1` por padrão; no Compose, as portas também são vinculadas apenas a `127.0.0.1`.
 - A chave OAuth atual usa Windows DPAPI. Por isso, a conexão Google não funciona no container Linux.
 
-Antes de iniciar uma versão que aplique mudanças ao schema, pare o backend e faça uma cópia física consistente. Copie juntos banco e mídia: `%LOCALAPPDATA%\Hub\data` e `%LOCALAPPDATA%\Hub\media` sem Docker; `hub_data` e `hub_media` no Compose. A cópia portátil exportada pelo Hub inclui capas em um pacote ZIP de até 100 MiB; arquivos JSON antigos continuam importáveis, mas não contêm imagens. Não use `down --volumes` se quiser preservar banco e capas.
+Antes de iniciar esta versão, pare o backend e faça uma cópia física consistente. Copie juntos banco e mídia: `%LOCALAPPDATA%\Hub\data` e `%LOCALAPPDATA%\Hub\media` sem Docker; `hub_data` e `hub_media` no Compose. A primeira conta executa a atribuição transacional dos registros antigos; após o commit, uma migração versionada aplica as restrições de propriedade. Se essa etapa não concluir, o backend bloqueia o login e os endpoints privados até a migração ser concluída. A cópia portátil exportada pelo Hub inclui capas em um pacote ZIP de até 100 MiB; arquivos JSON antigos continuam importáveis, mas não contêm imagens. Não use `down --volumes` se quiser preservar banco e capas.
 
 ## Estrutura do projeto
 
