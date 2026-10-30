@@ -46,6 +46,12 @@ public class Task {
 	@Column(name = "task_type", nullable = false, length = 16)
 	private Type type;
 
+	@Column(name = "series_id", length = 36)
+	private String seriesId;
+
+	@Column(name = "series_position")
+	private Integer seriesPosition;
+
 	protected Task() {}
 
 	public Task(String title, LocalDate dueDate, Type type) {
@@ -68,6 +74,28 @@ public class Task {
 		this.notes = notes == null ? "" : notes;
 	}
 
+	public static Task restoreLocal(String id, String title, LocalDate dueDate, LocalTime dueTime, boolean completed,
+			String category, String color, Priority priority, String notes) {
+		Task task = new Task(title, dueDate, dueTime, Type.LOCAL, category, color, priority, notes);
+		task.id = id;
+		task.completed = completed;
+		return task;
+	}
+
+	public static Task restoreLocal(String id, String title, LocalDate dueDate, LocalTime dueTime, boolean completed,
+			String category, String color, String priority, String notes, String seriesId, Integer seriesPosition) {
+		Task task = restoreLocal(id, title, dueDate, dueTime, completed, category, color,
+			priority == null ? Priority.NORMAL : Priority.valueOf(priority), notes);
+		task.seriesId = seriesId;
+		task.seriesPosition = seriesPosition;
+		return task;
+	}
+
+	public void assignToSeries(String seriesId, int position) {
+		this.seriesId = seriesId;
+		this.seriesPosition = position;
+	}
+
 	public String getId() { return id; }
 	public String getTitle() { return title; }
 	public LocalDate getDueDate() { return dueDate; }
@@ -78,6 +106,8 @@ public class Task {
 	public Priority getPriority() { return priority; }
 	public String getNotes() { return notes; }
 	public Type getType() { return type; }
+	public String getSeriesId() { return seriesId; }
+	public Integer getSeriesPosition() { return seriesPosition; }
 
 	public void update(LocalDate dueDate, LocalTime dueTime, boolean completed, String category, String color, Priority priority, String notes) {
 		this.dueDate = dueDate;

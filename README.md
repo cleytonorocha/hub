@@ -12,7 +12,7 @@ O Hub combina uma interface Vue com uma API Spring Boot. As tasks locais são sa
 
 Alterne entre as visualizações diária, semanal, mensal e anual. Cada uma oferece apresentações próprias, e as configurações permitem escolher qual apresentação abrir por padrão. Clique em uma data ou horário para iniciar uma task com esses dados preenchidos.
 
-Capturas reais com tarefas de demonstração:
+Capturas atuais da aplicação no navegador (30/10/2026):
 
 | Dia | Semana |
 | --- | --- |
@@ -34,7 +34,7 @@ Mockups de referência (não são capturas do app):
 
 ### Outras telas
 
-Capturas reais com dados de demonstração:
+Capturas atuais da aplicação no navegador (30/10/2026):
 
 | Visão Geral | Notificações |
 | --- | --- |
@@ -44,9 +44,15 @@ Capturas reais com dados de demonstração:
 | --- | --- |
 | [![Configurações](docs/screenshots/settings.png)](docs/screenshots/settings.png) | [![Ferramentas para baixar vídeos](docs/screenshots/tools.png)](docs/screenshots/tools.png) |
 
+| Biblioteca de leitura |
+| --- |
+| [![Biblioteca de leitura](docs/screenshots/reading-library.png)](docs/screenshots/reading-library.png) |
+
 ### Recursos
 
 - **Tasks locais:** título, data, horário, categoria, cor, prioridade, observações e estado de conclusão.
+- **Busca global:** no Calendário, encontre tasks por título, categoria ou observações e filtre por estado, prioridade e período, incluindo tasks sem data ou concluídas.
+- **Biblioteca de leitura:** organize livros, artigos e vídeos em fileiras por estado, na ordem **Em andamento**, **A ler** e **Concluído**. Cada fileira aparece somente quando há resultados. A busca aceita título, autor/origem e notas, com filtros por estado, tipo e autor e paginação no servidor. Livros podem ter capa local, etiquetas, notas e progresso por páginas; capas entram na cópia portátil.
 - **Notificações:** visão de tasks vencidas, para hoje e para amanhã.
 - **Configurações:** resumo semanal, valores padrão para novas tasks e apresentação padrão de cada visualização do calendário.
 - **Baixar vídeos:** tela inicial com seleção de plataforma e validação local do formato e domínio do link. A integração de download ainda não está implementada.
@@ -118,17 +124,18 @@ docker compose logs -f
 docker compose down
 ```
 
-`docker compose down` mantém o volume `hub_data`. Para apagar também o banco dos containers, use `docker compose down --volumes`. Isso remove os dados salvos no volume.
+`docker compose down` mantém os volumes `hub_data` e `hub_media`. O comando `docker compose down --volumes` apaga os dois, incluindo o banco e as imagens enviadas.
 
 ## Dados e privacidade
 
 - Sem Docker, o H2 fica em `%LOCALAPPDATA%\Hub\data` no Windows.
-- Com Docker, o H2 fica no volume nomeado `hub_data`. Esse banco é independente do arquivo local e não recebe os dados locais automaticamente.
+- Com Docker, o H2 fica no volume nomeado `hub_data`. As imagens da Biblioteca de leitura ficam no volume separado `hub_media`, organizadas em `reading-library/covers`. Esses dados são independentes do arquivo local e não recebem os dados locais automaticamente.
+- Sem Docker, as imagens ficam em `%LOCALAPPDATA%\Hub\media\reading-library\covers`, fora do repositório.
 - Preferências de apresentação e de tasks ficam no `localStorage` do navegador.
 - A API local usa `127.0.0.1` por padrão; no Compose, as portas também são vinculadas apenas a `127.0.0.1`.
 - A chave OAuth atual usa Windows DPAPI. Por isso, a conexão Google não funciona no container Linux.
 
-Para fazer backup do banco local, pare o backend e copie os arquivos de `%LOCALAPPDATA%\Hub\data`. Para o banco do Compose, mantenha o volume `hub_data`; não use `down --volumes` se quiser preservar os registros.
+Antes de iniciar uma versão que aplique mudanças ao schema, pare o backend e faça uma cópia física consistente. Copie juntos banco e mídia: `%LOCALAPPDATA%\Hub\data` e `%LOCALAPPDATA%\Hub\media` sem Docker; `hub_data` e `hub_media` no Compose. A cópia portátil exportada pelo Hub inclui capas em um pacote ZIP de até 100 MiB; arquivos JSON antigos continuam importáveis, mas não contêm imagens. Não use `down --volumes` se quiser preservar banco e capas.
 
 ## Estrutura do projeto
 

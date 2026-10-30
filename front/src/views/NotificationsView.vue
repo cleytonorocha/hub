@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { getNotificationWindow, getPendingNotifications } from '../utils/notifications'
 import { useTaskHub } from '../services/taskHub'
 import ContextMenu from '../components/ContextMenu.vue'
+import { normalizeSearchText as normalize } from '../utils/taskSearch'
 
 const router = useRouter()
 const { state, updateTask, refreshTasks, deleteTask } = useTaskHub()
@@ -48,10 +49,6 @@ const contextMenuItems = [
   { id: 'complete', label: 'Concluir task' },
   { id: 'delete', label: 'Excluir task', danger: true },
 ]
-
-function normalize(value) {
-  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('pt-BR')
-}
 
 function reminderKind(task) {
   if (task.dueDate < todayKey) return 'overdue'

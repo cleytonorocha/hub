@@ -10,6 +10,7 @@ public record UpdateTaskRequest(
 	LocalDate dueDate,
 	LocalTime dueTime,
 	boolean completed,
+	Boolean confirmPendingChecklist,
 	@Size(max = 64) String category,
 	@Pattern(regexp = "^#[0-9A-Fa-f]{6}$") String color,
 	Task.Priority priority,

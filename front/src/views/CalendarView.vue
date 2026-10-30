@@ -481,6 +481,7 @@ function handleModeKeydown(event) {
           <span>Tarefas locais</span>
         </div>
         <div class="calendar-task-toolbar-actions">
+          <button class="task-secondary-button" type="button" @click="router.push({ name: 'task-search' })">Buscar tasks</button>
           <button class="task-secondary-button" type="button" :disabled="taskState.refreshing" @click="refreshCalendarTasks">{{ taskState.refreshing ? 'Atualizando…' : 'Atualizar' }}</button>
           <button class="task-secondary-button" type="button" :aria-expanded="noDateListOpen" @click="noDateListOpen = !noDateListOpen">Sem data · {{ tasksWithoutDate.length }}</button>
           <button class="task-primary-button" type="button" @click="openComposer($event, selectedKey, true)">+ Nova Task</button>

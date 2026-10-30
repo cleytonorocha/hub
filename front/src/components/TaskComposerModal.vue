@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useTaskHub } from '../services/taskHub'
 import { CUSTOM_TASK_CATEGORY_VALUE, readTaskPreferences, TASK_CATEGORY_SUGGESTIONS } from '../utils/preferences'
 
@@ -9,7 +9,7 @@ const props = defineProps({
   requireDate: { type: Boolean, default: false },
 })
 const emit = defineEmits(['close', 'created'])
-const { createTask } = useTaskHub()
+const { createTask, createTaskSeries } = useTaskHub()
 const taskDefaults = readTaskPreferences()
 const title = ref('')
 const date = ref(props.initialDate)
@@ -22,9 +22,32 @@ const categoryChoice = computed({
 const color = ref(taskDefaults.color)
 const priority = ref(taskDefaults.priority)
 const notes = ref('')
+const repeatWeekly = ref(false)
+const occurrenceCount = ref(2)
+const operationId = ref(crypto.randomUUID())
 const saving = ref(false)
 const error = ref('')
 const titleInput = ref(null)
+const occurrenceDates = computed(() => {
+  if (!date.value || !repeatWeekly.value) return []
+  const count = Number(occurrenceCount.value)
+  if (!Number.isInteger(count) || count < 2 || count > 52) return []
+  const [year, month, day] = date.value.split('-').map(Number)
+  const start = new Date(Date.UTC(year, month - 1, day))
+  return Array.from({ length: count }, (_, index) => {
+    const current = new Date(start)
+    current.setUTCDate(current.getUTCDate() + index * 7)
+    return `${current.getUTCFullYear()}-${String(current.getUTCMonth() + 1).padStart(2, '0')}-${String(current.getUTCDate()).padStart(2, '0')}`
+  })
+})
+
+watch([title, date, time, repeatWeekly, occurrenceCount, category, color, priority, notes], () => {
+  operationId.value = crypto.randomUUID()
+})
+
+function formatDate(value) {
+  return new Intl.DateTimeFormat('pt-BR', { dateStyle: 'long' }).format(new Date(`${value}T12:00:00`))
+}
 
 function handleKeydown(event) {
   if (event.key === 'Escape' && !saving.value) emit('close')
@@ -52,9 +75,17 @@ async function submit() {
     error.value = 'Escolha a data em que esta Task aparecerá no calendário.'
     return
   }
+  if (repeatWeekly.value && !date.value) {
+    error.value = 'Escolha a data inicial da série semanal.'
+    return
+  }
+  if (repeatWeekly.value && (!Number.isInteger(Number(occurrenceCount.value)) || Number(occurrenceCount.value) < 2 || Number(occurrenceCount.value) > 52)) {
+    error.value = 'A série precisa ter entre 2 e 52 ocorrências.'
+    return
+  }
   saving.value = true
   try {
-    const created = await createTask({
+    const data = {
       title: title.value.trim(),
       dueDate: date.value || null,
       dueTime: time.value || null,
@@ -63,8 +94,16 @@ async function submit() {
       color: color.value,
       priority: priority.value,
       notes: notes.value,
-    })
-    emit('created', created)
+    }
+    if (repeatWeekly.value) {
+      const seriesRequest = { ...data, operationId: operationId.value, startDate: date.value,
+        occurrenceCount: Number(occurrenceCount.value), timeZoneId: Intl.DateTimeFormat().resolvedOptions().timeZone }
+      delete seriesRequest.dueDate
+      const created = await createTaskSeries(seriesRequest)
+      emit('created', created.occurrences[0])
+    } else {
+      emit('created', await createTask(data))
+    }
   } catch (apiError) {
     error.value = apiError.message
   } finally {
@@ -85,6 +124,15 @@ onMounted(() => nextTick(() => titleInput.value?.focus()))
       <form class="task-composer-form" @submit.prevent="submit">
         <label class="task-field"><span>Título</span><input ref="titleInput" v-model="title" maxlength="1024" autocomplete="off" placeholder="Ex.: Revisar planejamento" required></label>
         <label class="task-field"><span>Data</span><input v-model="date" type="date" :required="requireDate"><small>{{ requireDate ? 'Esta Task aparecerá no dia selecionado.' : 'Deixe em branco para colocar em Sem data.' }}</small></label>
+        <label class="task-series-toggle"><input v-model="repeatWeekly" type="checkbox"><span>Repetir semanalmente</span></label>
+        <template v-if="repeatWeekly">
+          <label class="task-field"><span>Quantidade de ocorrências</span><input v-model.number="occurrenceCount" type="number" min="2" max="52" required><small>Entre 2 e 52, incluindo a data inicial.</small></label>
+          <section class="task-series-preview" aria-live="polite" aria-label="Prévia das datas da série">
+            <strong>{{ occurrenceDates.length }} ocorrências · até {{ occurrenceDates.length ? formatDate(occurrenceDates.at(-1)) : 'escolha uma data' }}</strong>
+            <ol v-if="occurrenceDates.length"><li v-for="day in occurrenceDates" :key="day">{{ formatDate(day) }}</li></ol>
+            <p>As ocorrências são tarefas independentes. Alterar uma não move as outras.</p>
+          </section>
+        </template>
         <label class="task-field"><span>Horário</span><input v-model="time" type="time"><small>Opcional. Você pode ajustar o horário antes de salvar.</small></label>
         <label class="task-field"><span>Categoria</span><select v-model="categoryChoice"><option v-for="suggestion in TASK_CATEGORY_SUGGESTIONS" :key="suggestion" :value="suggestion">{{ suggestion }}</option><option :value="CUSTOM_TASK_CATEGORY_VALUE">Outra categoria…</option></select></label>
         <label v-if="categoryChoice === CUSTOM_TASK_CATEGORY_VALUE" class="task-field"><span>Nome da categoria</span><input v-model="category" maxlength="64" placeholder="Digite uma categoria" autocomplete="off"></label>

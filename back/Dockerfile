@@ -16,8 +16,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system hub \
     && useradd --system --gid hub --home-dir /app --no-create-home hub \
-    && mkdir -p /app /data \
-    && chown -R hub:hub /app /data
+    && mkdir -p /app /data /var/lib/hub/media \
+    && chown -R hub:hub /app /data /var/lib/hub
 
 WORKDIR /app
 COPY --from=build --chown=hub:hub /workspace/target/*.jar /app/hub.jar
