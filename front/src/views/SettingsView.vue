@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
+import TaskBackupPanel from '../components/TaskBackupPanel.vue'
 import {
   CUSTOM_TASK_CATEGORY_VALUE,
   readTaskPreferences,
@@ -62,6 +63,7 @@ function systemPresentationLabel(mode) {
         <a href="#overview-settings" :class="{ 'settings-subnav-active': activeSection === 'overview' }" :aria-current="activeSection === 'overview' ? 'location' : undefined" @click="activeSection = 'overview'">Visão Geral</a>
         <a href="#task-settings" :class="{ 'settings-subnav-active': activeSection === 'tasks' }" :aria-current="activeSection === 'tasks' ? 'location' : undefined" @click="activeSection = 'tasks'">Tarefas</a>
         <a href="#calendar-settings" :class="{ 'settings-subnav-active': activeSection === 'calendar' }" :aria-current="activeSection === 'calendar' ? 'location' : undefined" @click="activeSection = 'calendar'">Calendário</a>
+        <a href="#data-settings" :class="{ 'settings-subnav-active': activeSection === 'data' }" :aria-current="activeSection === 'data' ? 'location' : undefined" @click="activeSection = 'data'">Dados</a>
       </nav>
 
       <div class="settings-content">
@@ -116,6 +118,10 @@ function systemPresentationLabel(mode) {
             </select>
           </div>
           <p class="settings-storage-note">As preferências são salvas neste navegador.</p>
+        </section>
+
+          <section id="data-settings" class="settings-group" aria-label="Cópia portátil e importação de dados">
+          <TaskBackupPanel />
         </section>
       </div>
     </div>

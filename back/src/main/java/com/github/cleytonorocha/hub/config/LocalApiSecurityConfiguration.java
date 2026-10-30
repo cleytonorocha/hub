@@ -9,8 +9,8 @@ import org.springframework.security.web.SecurityFilterChain;
 public class LocalApiSecurityConfiguration {
 	@Bean
 	SecurityFilterChain localApiSecurity(HttpSecurity http) throws Exception {
-		return http.csrf(csrf -> csrf.ignoringRequestMatchers("/api/tasks/**"))
-			.authorizeHttpRequests(requests -> requests.requestMatchers("/api/tasks/**").permitAll()
+		return http.csrf(csrf -> csrf.ignoringRequestMatchers("/api/tasks/**", "/api/task-series/**", "/api/reading-items/**"))
+			.authorizeHttpRequests(requests -> requests.requestMatchers("/api/tasks/**", "/api/task-series/**", "/api/reading-items/**").permitAll()
 				.anyRequest().authenticated())
 			.build();
 	}

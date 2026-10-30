@@ -19,10 +19,12 @@ services:
       SPRING_H2_CONSOLE_ENABLED: "false"
       SPRING_SQL_INIT_MODE: always
       HUB_GOOGLE_OAUTH_CLIENT_ID: ${HUB_GOOGLE_OAUTH_CLIENT_ID:-}
+      HUB_MEDIA_ROOT: /var/lib/hub/media
     ports:
       - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
     volumes:
       - hub_data:/data
+      - hub_media:/var/lib/hub/media
     healthcheck:
       test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:8080/api/tasks >/dev/null || exit 1"]
       interval: 15s
@@ -51,3 +53,5 @@ services:
 volumes:
   hub_data:
     name: hub_data
+  hub_media:
+    name: hub_media
