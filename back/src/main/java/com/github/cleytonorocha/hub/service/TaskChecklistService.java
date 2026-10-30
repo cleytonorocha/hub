@@ -15,6 +15,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
+import com.github.cleytonorocha.hub.security.AuthContext;
 
 @Service
 public class TaskChecklistService {
@@ -34,9 +35,10 @@ public class TaskChecklistService {
 	public ChecklistView get(String taskId) {
 		Task task = requireLocalTask(taskId);
 		if (task.getSeriesId() != null) throw new ResponseStatusException(HttpStatus.CONFLICT, "Checklist não está disponível para ocorrências de séries semanais.");
-		Long revision = jdbc.query("SELECT revision FROM hub_task_checklist_revision WHERE task_id = ?", rs -> rs.next() ? rs.getLong(1) : null, taskId);
-		List<ChecklistItem> items = jdbc.query("SELECT id, item_text, checked, item_order FROM hub_task_checklist_item WHERE task_id = ? ORDER BY item_order",
-			(rs, row) -> new ChecklistItem(rs.getString("id"), rs.getString("item_text"), rs.getBoolean("checked"), rs.getInt("item_order")), taskId);
+		String owner = AuthContext.userId();
+		Long revision = jdbc.query("SELECT revision FROM hub_task_checklist_revision WHERE task_id = ? AND owner_id = ?", rs -> rs.next() ? rs.getLong(1) : null, taskId, owner);
+		List<ChecklistItem> items = jdbc.query("SELECT id, item_text, checked, item_order FROM hub_task_checklist_item WHERE task_id = ? AND owner_id = ? ORDER BY item_order",
+			(rs, row) -> new ChecklistItem(rs.getString("id"), rs.getString("item_text"), rs.getBoolean("checked"), rs.getInt("item_order")), taskId, owner);
 		return new ChecklistView(revision == null ? 0 : revision, items);
 	}
 
@@ -47,39 +49,41 @@ public class TaskChecklistService {
 		if (task.getSeriesId() != null) throw new ResponseStatusException(HttpStatus.CONFLICT, "Checklist não está disponível para ocorrências de séries semanais.");
 		if (task.isCompleted()) throw new ResponseStatusException(HttpStatus.CONFLICT, "Reabra a tarefa antes de editar o checklist.");
 		validate(request);
-		Long current = jdbc.query("SELECT revision FROM hub_task_checklist_revision WHERE task_id = ? FOR UPDATE", rs -> rs.next() ? rs.getLong(1) : null, taskId);
+		String owner = AuthContext.userId();
+		Long current = jdbc.query("SELECT revision FROM hub_task_checklist_revision WHERE task_id = ? AND owner_id = ? FOR UPDATE", rs -> rs.next() ? rs.getLong(1) : null, taskId, owner);
 		long revision = current == null ? 0 : current;
 		if (request.expectedRevision() != revision) throw new ResponseStatusException(HttpStatus.CONFLICT, "O checklist mudou em outra aba. Recarregue a versão salva antes de tentar novamente.");
-		if (current == null) jdbc.update("INSERT INTO hub_task_checklist_revision(task_id, revision) VALUES (?, 0)", taskId);
-		jdbc.update("DELETE FROM hub_task_checklist_item WHERE task_id = ?", taskId);
+		if (current == null) jdbc.update("INSERT INTO hub_task_checklist_revision(task_id, revision, owner_id) VALUES (?, 0, ?)", taskId, owner);
+		jdbc.update("DELETE FROM hub_task_checklist_item WHERE task_id = ? AND owner_id = ?", taskId, owner);
 		for (int i = 0; i < request.items().size(); i++) {
 			ChecklistItem item = request.items().get(i);
-			jdbc.update("INSERT INTO hub_task_checklist_item(id, task_id, item_order, item_text, checked) VALUES (?, ?, ?, ?, ?)",
-				item.id(), taskId, i, item.text().strip(), item.checked());
+			jdbc.update("INSERT INTO hub_task_checklist_item(id, task_id, item_order, item_text, checked, owner_id) VALUES (?, ?, ?, ?, ?, ?)",
+				item.id(), taskId, i, item.text().strip(), item.checked(), owner);
 		}
-		jdbc.update("UPDATE hub_task_checklist_revision SET revision = revision + 1 WHERE task_id = ?", taskId);
+		jdbc.update("UPDATE hub_task_checklist_revision SET revision = revision + 1 WHERE task_id = ? AND owner_id = ?", taskId, owner);
 		collectionRevision.increment();
 		return get(taskId);
 	}
 
 	public boolean hasPending(String taskId) {
-		Integer pending = jdbc.queryForObject("SELECT COUNT(*) FROM hub_task_checklist_item WHERE task_id = ? AND checked = FALSE", Integer.class, taskId);
+		Integer pending = jdbc.queryForObject("SELECT COUNT(*) FROM hub_task_checklist_item WHERE task_id = ? AND owner_id = ? AND checked = FALSE", Integer.class, taskId, AuthContext.userId());
 		return pending != null && pending > 0;
 	}
 
 	@Transactional(readOnly = true)
 	public List<BackupChecklistItem> exportItems(String taskId) {
-		return jdbc.query("SELECT id, item_text, checked, item_order FROM hub_task_checklist_item WHERE task_id = ? ORDER BY item_order",
-			(rs, row) -> new BackupChecklistItem(rs.getString("id"), rs.getString("item_text"), rs.getBoolean("checked"), rs.getInt("item_order")), taskId);
+		return jdbc.query("SELECT id, item_text, checked, item_order FROM hub_task_checklist_item WHERE task_id = ? AND owner_id = ? ORDER BY item_order",
+			(rs, row) -> new BackupChecklistItem(rs.getString("id"), rs.getString("item_text"), rs.getBoolean("checked"), rs.getInt("item_order")), taskId, AuthContext.userId());
 	}
 
 	public void restoreImported(String taskId, List<BackupChecklistItem> items) {
 		if (items == null || items.isEmpty()) return;
-		jdbc.update("INSERT INTO hub_task_checklist_revision(task_id, revision) VALUES (?, 1)", taskId);
+		String owner = AuthContext.userId();
+		jdbc.update("INSERT INTO hub_task_checklist_revision(task_id, revision, owner_id) VALUES (?, 1, ?)", taskId, owner);
 		for (int i = 0; i < items.size(); i++) {
 			BackupChecklistItem item = items.get(i);
-			jdbc.update("INSERT INTO hub_task_checklist_item(id, task_id, item_order, item_text, checked) VALUES (?, ?, ?, ?, ?)",
-				item.id(), taskId, i, item.text(), item.checked());
+			jdbc.update("INSERT INTO hub_task_checklist_item(id, task_id, item_order, item_text, checked, owner_id) VALUES (?, ?, ?, ?, ?, ?)",
+				item.id(), taskId, i, item.text(), item.checked(), owner);
 		}
 	}
 

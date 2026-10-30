@@ -4,6 +4,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.TenantId;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.UUID;
@@ -14,6 +15,9 @@ public class TaskSeries {
 	@Id
 	@Column(length = 36, nullable = false)
 	private String id;
+	@TenantId
+	@Column(name = "owner_id", length = 36)
+	private String ownerId;
 	@Column(name = "operation_id", length = 36, nullable = false, unique = true)
 	private String operationId;
 	@Column(nullable = false, length = 1024)

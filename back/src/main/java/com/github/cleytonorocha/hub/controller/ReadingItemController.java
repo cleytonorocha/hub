@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.access.prepost.PreAuthorize;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
@@ -34,6 +35,7 @@ public class ReadingItemController {
 	public ReadingItemController(ReadingItemService items) { this.items = items; }
 
 	@GetMapping
+	@PreAuthorize("hasAuthority('READING_READ')")
 	public SearchResponse search(
 			@RequestParam(defaultValue = "") String q,
 			@RequestParam(required = false) String status,
@@ -46,9 +48,11 @@ public class ReadingItemController {
 	}
 
 	@GetMapping("/authors")
+	@PreAuthorize("hasAuthority('READING_READ')")
 	public java.util.List<com.github.cleytonorocha.hub.dto.ReadingItemDtos.AuthorView> authors() { return items.listAuthors(); }
 
 	@PostMapping("/authors")
+	@PreAuthorize("hasAuthority('READING_WRITE')")
 	@ResponseStatus(HttpStatus.CREATED)
 	public com.github.cleytonorocha.hub.dto.ReadingItemDtos.AuthorView createAuthor(@Valid @RequestBody AuthorRequest request) {
 		return items.createAuthor(request.name());
@@ -56,16 +60,20 @@ public class ReadingItemController {
 	public record AuthorRequest(@NotBlank @Size(max = 160) String name) {}
 
 	@PostMapping
+	@PreAuthorize("hasAuthority('READING_WRITE')")
 	@ResponseStatus(HttpStatus.CREATED)
 	public ItemView create(@Valid @RequestBody CreateRequest request) { return items.create(request); }
 
 	@GetMapping("/{id}")
+	@PreAuthorize("hasAuthority('READING_READ')")
 	public ItemView get(@PathVariable String id) { return items.get(id); }
 
 	@PutMapping("/{id}")
+	@PreAuthorize("hasAuthority('READING_WRITE')")
 	public ItemView update(@PathVariable String id, @Valid @RequestBody UpdateRequest request) { return items.update(id, request); }
 
 	@PutMapping(value = "/{id}/cover", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+	@PreAuthorize("hasAuthority('READING_WRITE')")
 	public ItemView uploadCover(@PathVariable String id, @RequestParam long revision, @RequestPart("file") MultipartFile file) {
 		try { return items.uploadCover(id, revision, file); }
 		catch (com.github.cleytonorocha.hub.service.ReadingCoverStorageService.CoverValidationException error) {
@@ -74,6 +82,7 @@ public class ReadingItemController {
 	}
 
 	@PostMapping("/{id}/cover/import")
+	@PreAuthorize("hasAuthority('READING_WRITE')")
 	public ItemView importCover(@PathVariable String id, @Valid @RequestBody CoverImportRequest request) {
 		try { return items.importCoverFromUrl(id, request.revision(), request.url()); }
 		catch (IllegalArgumentException error) { throw new org.springframework.web.server.ResponseStatusException(HttpStatus.BAD_REQUEST, error.getMessage()); }
@@ -82,9 +91,11 @@ public class ReadingItemController {
 		@jakarta.validation.constraints.NotBlank @jakarta.validation.constraints.Size(max = 2048) String url) {}
 
 	@DeleteMapping("/{id}/cover")
+	@PreAuthorize("hasAuthority('READING_WRITE')")
 	public ItemView removeCover(@PathVariable String id, @RequestParam long revision) { return items.removeCover(id, revision); }
 
 	@GetMapping(value = "/{id}/cover", produces = {"image/jpeg", "image/png"})
+	@PreAuthorize("hasAuthority('READING_READ')")
 	public ResponseEntity<byte[]> cover(@PathVariable String id, @RequestParam(defaultValue = "false") boolean thumbnail) {
 		CoverContent cover = items.readCover(id, thumbnail);
 		return ResponseEntity.ok().contentType(cover.mediaType())

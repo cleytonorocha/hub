@@ -59,6 +59,7 @@ WHERE NOT EXISTS (SELECT 1 FROM hub_task_settings WHERE settings_id = 1);
 
 CREATE TABLE IF NOT EXISTS hub_task (
     id VARCHAR(36) PRIMARY KEY,
+    owner_id VARCHAR(36),
     title VARCHAR(1024) NOT NULL,
     due_date DATE,
     due_time TIME,
@@ -90,6 +91,7 @@ WHERE NOT EXISTS (SELECT 1 FROM hub_task_collection_state WHERE state_id = 1);
 
 CREATE TABLE IF NOT EXISTS hub_task_series (
     id VARCHAR(36) PRIMARY KEY,
+    owner_id VARCHAR(36),
     operation_id VARCHAR(36) NOT NULL UNIQUE,
     title VARCHAR(1024) NOT NULL,
     start_date DATE NOT NULL,
@@ -126,6 +128,7 @@ CREATE INDEX IF NOT EXISTS idx_hub_task_checklist_task ON hub_task_checklist_ite
 
 CREATE TABLE IF NOT EXISTS hub_reading_item (
     id VARCHAR(36) PRIMARY KEY,
+    owner_id VARCHAR(36),
     title VARCHAR(1024) NOT NULL,
     item_type VARCHAR(16) NOT NULL,
     author_or_source VARCHAR(512),
@@ -168,8 +171,9 @@ CREATE INDEX IF NOT EXISTS idx_hub_reading_item_archive_status_type ON hub_readi
 
 CREATE TABLE IF NOT EXISTS hub_reading_author (
     id VARCHAR(36) PRIMARY KEY,
+    owner_id VARCHAR(36),
     name VARCHAR(160) NOT NULL,
-    normalized_name VARCHAR(160) NOT NULL UNIQUE
+    normalized_name VARCHAR(160) NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS hub_reading_item_author (
@@ -190,3 +194,78 @@ CREATE TABLE IF NOT EXISTS hub_reading_collection_state (
 INSERT INTO hub_reading_collection_state (state_id, revision)
 SELECT 1, 0
 WHERE NOT EXISTS (SELECT 1 FROM hub_reading_collection_state WHERE state_id = 1);
+
+CREATE TABLE IF NOT EXISTS hub_user (
+    id VARCHAR(36) PRIMARY KEY,
+    display_name VARCHAR(120) NOT NULL,
+    email VARCHAR(254) NOT NULL,
+    normalized_email VARCHAR(254) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    profile_id VARCHAR(36) NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS hub_permission_profile (
+    id VARCHAR(36) PRIMARY KEY,
+    name VARCHAR(80) NOT NULL,
+    normalized_name VARCHAR(80) NOT NULL UNIQUE,
+    permissions CLOB NOT NULL,
+    system_profile BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+CREATE TABLE IF NOT EXISTS hub_task_user_revision (
+    owner_id VARCHAR(36) PRIMARY KEY,
+    revision BIGINT NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS hub_reading_user_revision (
+    owner_id VARCHAR(36) PRIMARY KEY,
+    revision BIGINT NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS hub_auth_bootstrap (
+    bootstrap_id INTEGER PRIMARY KEY,
+    CONSTRAINT chk_hub_auth_bootstrap_id CHECK (bootstrap_id = 1)
+);
+INSERT INTO hub_auth_bootstrap (bootstrap_id)
+SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM hub_auth_bootstrap WHERE bootstrap_id = 1);
+
+CREATE TABLE IF NOT EXISTS hub_schema_migration (
+    migration_id VARCHAR(120) PRIMARY KEY,
+    applied_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+ALTER TABLE hub_task ADD COLUMN IF NOT EXISTS owner_id VARCHAR(36);
+ALTER TABLE hub_task_series ADD COLUMN IF NOT EXISTS owner_id VARCHAR(36);
+ALTER TABLE hub_reading_item ADD COLUMN IF NOT EXISTS owner_id VARCHAR(36);
+ALTER TABLE hub_reading_author ADD COLUMN IF NOT EXISTS owner_id VARCHAR(36);
+ALTER TABLE hub_reading_item_author ADD COLUMN IF NOT EXISTS owner_id VARCHAR(36);
+ALTER TABLE hub_reading_item_tag ADD COLUMN IF NOT EXISTS owner_id VARCHAR(36);
+ALTER TABLE hub_task_checklist_revision ADD COLUMN IF NOT EXISTS owner_id VARCHAR(36);
+ALTER TABLE hub_task_checklist_item ADD COLUMN IF NOT EXISTS owner_id VARCHAR(36);
+ALTER TABLE hub_task_collection_state ADD COLUMN IF NOT EXISTS owner_id VARCHAR(36);
+ALTER TABLE hub_reading_collection_state ADD COLUMN IF NOT EXISTS owner_id VARCHAR(36);
+ALTER TABLE hub_task_settings ADD COLUMN IF NOT EXISTS owner_id VARCHAR(36);
+ALTER TABLE google_connection ADD COLUMN IF NOT EXISTS owner_id VARCHAR(36);
+ALTER TABLE google_task_list_state ADD COLUMN IF NOT EXISTS owner_id VARCHAR(36);
+ALTER TABLE google_task_state ADD COLUMN IF NOT EXISTS owner_id VARCHAR(36);
+ALTER TABLE hub_task_notification ADD COLUMN IF NOT EXISTS owner_id VARCHAR(36);
+
+ALTER TABLE hub_task ADD CONSTRAINT IF NOT EXISTS uq_hub_task_owner_id_constraint UNIQUE (owner_id, id);
+ALTER TABLE hub_task_series ADD CONSTRAINT IF NOT EXISTS uq_hub_task_series_owner_id_constraint UNIQUE (owner_id, id);
+ALTER TABLE hub_reading_item ADD CONSTRAINT IF NOT EXISTS uq_hub_reading_item_owner_id_constraint UNIQUE (owner_id, id);
+ALTER TABLE hub_reading_author ADD CONSTRAINT IF NOT EXISTS uq_hub_reading_author_owner_id_constraint UNIQUE (owner_id, id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_hub_reading_author_owner_name ON hub_reading_author (owner_id, normalized_name);
+CREATE INDEX IF NOT EXISTS idx_hub_reading_item_author_owner_item ON hub_reading_item_author (owner_id, reading_item_id);
+CREATE INDEX IF NOT EXISTS idx_hub_reading_item_tag_owner_item ON hub_reading_item_tag (owner_id, reading_item_id, tag_order);
+CREATE INDEX IF NOT EXISTS idx_hub_task_checklist_owner_task ON hub_task_checklist_item (owner_id, task_id, item_order);
+
+CREATE INDEX IF NOT EXISTS idx_hub_task_owner_due ON hub_task (owner_id, due_date, due_time, id);
+CREATE INDEX IF NOT EXISTS idx_hub_reading_owner_status_updated ON hub_reading_item (owner_id, archived, reading_status, updated_at, id);
+CREATE INDEX IF NOT EXISTS idx_hub_task_series_owner ON hub_task_series (owner_id, id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_hub_task_owner_id ON hub_task (owner_id, id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_hub_task_series_owner_id ON hub_task_series (owner_id, id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_hub_reading_item_owner_id ON hub_reading_item (owner_id, id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_hub_reading_author_owner_id ON hub_reading_author (owner_id, id);
+

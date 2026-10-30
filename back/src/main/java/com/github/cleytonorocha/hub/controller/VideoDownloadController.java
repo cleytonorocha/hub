@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 @RestController
 @RequestMapping("/api/video-downloads")
@@ -26,6 +27,7 @@ public class VideoDownloadController {
 	public VideoDownloadController(VideoDownloadService downloads) { this.downloads = downloads; }
 
 	@PostMapping
+	@PreAuthorize("hasAuthority('VIDEO_DOWNLOAD')")
 	public ResponseEntity<StreamingResponseBody> download(@Valid @RequestBody VideoDownloadRequest request) {
 		VideoDownloadService.DownloadedVideo video;
 		try {

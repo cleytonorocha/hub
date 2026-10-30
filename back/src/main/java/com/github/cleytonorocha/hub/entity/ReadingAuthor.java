@@ -4,6 +4,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.TenantId;
 import java.text.Normalizer;
 import java.util.Locale;
 import java.util.UUID;
@@ -14,9 +15,12 @@ public class ReadingAuthor {
 	@Id
 	@Column(name = "id", length = 36, nullable = false, columnDefinition = "varchar(36)")
 	private String id;
+	@TenantId
+	@Column(name = "owner_id", length = 36)
+	private String ownerId;
 	@Column(name = "name", length = 160, nullable = false, columnDefinition = "varchar(160)")
 	private String name;
-	@Column(name = "normalized_name", length = 160, nullable = false, unique = true, columnDefinition = "varchar(160)")
+	@Column(name = "normalized_name", length = 160, nullable = false, columnDefinition = "varchar(160)")
 	private String normalizedName;
 
 	protected ReadingAuthor() {}

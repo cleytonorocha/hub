@@ -6,6 +6,7 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.TenantId;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.UUID;
@@ -16,6 +17,10 @@ public class Task {
 	@Id
 	@Column(length = 36, nullable = false)
 	private String id;
+
+	@TenantId
+	@Column(name = "owner_id", length = 36)
+	private String ownerId;
 
 	@Column(nullable = false, length = 1024)
 	private String title;

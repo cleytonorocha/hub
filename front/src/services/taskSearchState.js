@@ -18,4 +18,14 @@ export const taskSearchState = reactive({
   hasLoaded: false,
   focusTaskId: '',
   scrollY: 0,
+  generation: 0,
 })
+
+export function resetTaskSearchState() {
+  const generation = taskSearchState.generation + 1
+  Object.assign(taskSearchState, {
+    query: '', filters: createSearchFilters(), appliedQuery: '', appliedFilters: createSearchFilters(),
+    page: 0, size: 50, items: [], total: 0, totalPages: 0, categories: [], loading: false,
+    error: '', hasLoaded: false, focusTaskId: '', scrollY: 0, generation,
+  })
+}

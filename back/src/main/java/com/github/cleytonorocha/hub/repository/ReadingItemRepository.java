@@ -9,9 +9,5 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 public interface ReadingItemRepository extends JpaRepository<ReadingItem, String>, JpaSpecificationExecutor<ReadingItem> {
 	List<ReadingItem> findAllByOrderByIdAsc();
 
-	@org.springframework.data.jpa.repository.EntityGraph(attributePaths = "tags")
-	List<ReadingItem> findAllWithTagsByIdIn(Collection<String> ids);
-
-	@org.springframework.data.jpa.repository.EntityGraph(attributePaths = {"tags", "authors"})
-	List<ReadingItem> findAllWithTagsAndAuthorsByIdIn(Collection<String> ids);
+	List<ReadingItem> findAllByIdIn(Collection<String> ids);
 }

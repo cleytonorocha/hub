@@ -90,10 +90,12 @@ public class TaskBackupService {
 	private final TaskImportPreviewStore previews;
 	private final ObjectMapper mapper;
 	private final ReadingCoverStorageService covers;
+	private final ReadingItemAssociationService readingAssociations;
 
 	public TaskBackupService(TaskRepository tasks, TaskSeriesRepository series, ReadingItemRepository readingItems,
 		TaskChecklistService checklists, TaskCollectionRevision collectionRevision, ReadingCollectionRevision readingCollectionRevision,
-		TaskImportPreviewStore previews, ObjectMapper mapper, ReadingCoverStorageService covers, ReadingAuthorRepository authors) {
+		TaskImportPreviewStore previews, ObjectMapper mapper, ReadingCoverStorageService covers, ReadingAuthorRepository authors,
+		ReadingItemAssociationService readingAssociations) {
 		this.tasks = tasks;
 		this.series = series;
 		this.readingItems = readingItems;
@@ -104,6 +106,7 @@ public class TaskBackupService {
 		this.previews = previews;
 		this.mapper = mapper;
 		this.covers = covers;
+		this.readingAssociations = readingAssociations;
 	}
 
 	@Transactional
@@ -247,6 +250,7 @@ public class TaskBackupService {
 				.map(item -> restoreReadingItem(item, coverNames.get(item.id()), coverDigests.get(item.id()))).toList();
 			readingItems.saveAll(readingAdditions);
 			readingItems.flush();
+			for (ReadingItem item : readingAdditions) readingAssociations.save(item);
 			if (!newlyStoredCovers.isEmpty()) cleanupImportedCoversOnRollback(newlyStoredCovers);
 			if (!additions.isEmpty() || !newSeries.isEmpty()) collectionRevision.increment();
 			if (!readingAdditions.isEmpty() || !newAuthors.isEmpty()) readingCollectionRevision.increment();
@@ -746,7 +750,9 @@ public class TaskBackupService {
 	private List<ReadingItem> loadReadingItemsWithTags(List<ReadingItem> source) {
 		if (source.isEmpty()) return List.of();
 		Map<String, ReadingItem> hydrated = new LinkedHashMap<>();
-		for (ReadingItem item : readingItems.findAllWithTagsAndAuthorsByIdIn(source.stream().map(ReadingItem::getId).toList())) hydrated.put(item.getId(), item);
+		List<ReadingItem> related = readingItems.findAllByIdIn(source.stream().map(ReadingItem::getId).toList());
+		readingAssociations.populate(related);
+		for (ReadingItem item : related) hydrated.put(item.getId(), item);
 		return source.stream().map(item -> hydrated.get(item.getId())).toList();
 	}
 

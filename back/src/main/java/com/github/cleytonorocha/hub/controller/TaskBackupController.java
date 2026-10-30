@@ -20,15 +20,17 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 @RestController
 @RequestMapping("/api/tasks/portable-copy")
-public final class TaskBackupController {
+public class TaskBackupController {
 	private final TaskBackupService backups;
 
 	public TaskBackupController(TaskBackupService backups) { this.backups = backups; }
 
 	@GetMapping("/export")
+	@PreAuthorize("hasAuthority('TASK_READ') and hasAuthority('READING_READ')")
 	public ResponseEntity<?> export() {
 		PortableCopy copy = backups.exportPortableCopy();
 		String filename = copy.zipped() ? "hub-portable-copy.zip" : "hub-portable-copy.json";
@@ -44,6 +46,7 @@ public final class TaskBackupController {
 	}
 
 	@PostMapping(value = "/preview", consumes = {MediaType.APPLICATION_JSON_VALUE, "application/zip"})
+	@PreAuthorize("hasAuthority('TASK_WRITE') and hasAuthority('READING_WRITE')")
 	public Preview preview(HttpServletRequest request) throws IOException {
 		if (isJson(request)) return backups.preview(readBoundedJson(request));
 		Path file = receivePackage(request);
@@ -52,6 +55,7 @@ public final class TaskBackupController {
 	}
 
 	@PostMapping(value = "/import", consumes = {MediaType.APPLICATION_JSON_VALUE, "application/zip"})
+	@PreAuthorize("hasAuthority('TASK_WRITE') and hasAuthority('READING_WRITE')")
 	public Confirmation confirm(@RequestHeader(name = "X-Task-Import-Preview", required = false) String token,
 			HttpServletRequest request) throws IOException {
 		if (token == null || token.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Revise o arquivo antes de importá-lo.");

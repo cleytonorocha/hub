@@ -1,3 +1,5 @@
+import { namespacedKey } from '../services/auth'
+
 export const DEFAULT_TASK_PREFERENCES = Object.freeze({
   category: 'Geral',
   color: '#A986FF',
@@ -28,19 +30,19 @@ const TASK_PRIORITIES = new Set(['LOW', 'NORMAL', 'HIGH'])
 const HEX_COLOR = /^#[0-9A-Fa-f]{6}$/
 
 export function readWeeklySummaryPreference() {
-  try { return window.localStorage.getItem(WEEKLY_SUMMARY_KEY) !== 'false' } catch { return true }
+  try { return window.localStorage.getItem(namespacedKey(WEEKLY_SUMMARY_KEY)) !== 'false' } catch { return true }
 }
 
 export function writeWeeklySummaryPreference(visible) {
-  try { window.localStorage.setItem(WEEKLY_SUMMARY_KEY, String(Boolean(visible))) } catch { /* Keep the current session preference. */ }
+  try { window.localStorage.setItem(namespacedKey(WEEKLY_SUMMARY_KEY), String(Boolean(visible))) } catch { /* Keep the current session preference. */ }
 }
 
 export function readVideoDownloaderCardPreference() {
-  try { return window.localStorage.getItem(VIDEO_DOWNLOADER_CARD_KEY) !== 'false' } catch { return true }
+  try { return window.localStorage.getItem(namespacedKey(VIDEO_DOWNLOADER_CARD_KEY)) !== 'false' } catch { return true }
 }
 
 export function writeVideoDownloaderCardPreference(visible) {
-  try { window.localStorage.setItem(VIDEO_DOWNLOADER_CARD_KEY, String(Boolean(visible))) } catch { /* Keep the current session preference. */ }
+  try { window.localStorage.setItem(namespacedKey(VIDEO_DOWNLOADER_CARD_KEY), String(Boolean(visible))) } catch { /* Keep the current session preference. */ }
 }
 
 export function normalizeTaskPreferences(value = {}) {
@@ -55,7 +57,7 @@ export function normalizeTaskPreferences(value = {}) {
 
 export function readTaskPreferences() {
   try {
-    const stored = window.localStorage.getItem(TASK_DEFAULTS_KEY)
+    const stored = window.localStorage.getItem(namespacedKey(TASK_DEFAULTS_KEY))
     return stored ? normalizeTaskPreferences(JSON.parse(stored)) : { ...DEFAULT_TASK_PREFERENCES }
   } catch {
     return { ...DEFAULT_TASK_PREFERENCES }
@@ -64,6 +66,6 @@ export function readTaskPreferences() {
 
 export function writeTaskPreferences(value) {
   const normalized = normalizeTaskPreferences(value)
-  try { window.localStorage.setItem(TASK_DEFAULTS_KEY, JSON.stringify(normalized)) } catch { /* Keep the current session preference. */ }
+  try { window.localStorage.setItem(namespacedKey(TASK_DEFAULTS_KEY), JSON.stringify(normalized)) } catch { /* Keep the current session preference. */ }
   return normalized
 }

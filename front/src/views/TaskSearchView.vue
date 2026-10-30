@@ -73,11 +73,12 @@ function buildCriteria(page) {
 }
 async function fetchPage(page) {
   const sequence = ++requestSequence.value
+  const generation = searchState.generation
   searchState.loading = true
   searchState.error = ''
   try {
     const result = await searchTasks(buildCriteria(page))
-    if (sequence !== requestSequence.value) return
+    if (sequence !== requestSequence.value || generation !== searchState.generation) return
     if (result.totalPages > 0 && page >= result.totalPages) {
       await fetchPage(result.totalPages - 1)
       return

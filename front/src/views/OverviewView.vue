@@ -7,10 +7,12 @@ import { useTaskHub } from '../services/taskHub'
 import { readVideoDownloaderCardPreference, readWeeklySummaryPreference } from '../utils/preferences'
 import TaskComposerModal from '../components/TaskComposerModal.vue'
 import ContextMenu from '../components/ContextMenu.vue'
+import { authState } from '../services/auth'
 
 const week = getCurrentWeek()
 const today = getDateKey(new Date())
 const { state } = useTaskHub()
+const profileInitials = computed(() => (authState.user?.displayName || '').split(/\s+/).slice(0, 2).map((part) => part[0] || '').join('').toUpperCase())
 const notificationCount = computed(() => getPendingNotifications(state.tasks).length)
 const contextMenu = ref(null)
 const composerOpen = ref(false)
@@ -106,7 +108,7 @@ const days = week.days.map((date) => ({
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></svg>
         <span v-if="notificationCount" class="hero-notification-count">{{ notificationCount > 99 ? '99+' : notificationCount }}</span>
       </RouterLink>
-      <div class="profile-control" aria-label="Perfil de Julia Santos"><span class="profile-avatar" aria-hidden="true">JS</span></div>
+      <div class="profile-control" :aria-label="'Perfil de ' + (authState.user?.displayName || 'usuário')"><span class="profile-avatar" aria-hidden="true">{{ profileInitials }}</span></div>
     </div>
     <div class="hero-copy"><h1 id="welcome-title">{{ greeting }}</h1><p class="hero-description">Um espaço para acompanhar o que importa.</p></div>
   </section>

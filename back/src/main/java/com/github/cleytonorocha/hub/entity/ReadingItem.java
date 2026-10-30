@@ -1,16 +1,12 @@
 package com.github.cleytonorocha.hub.entity;
 
-import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
-import jakarta.persistence.ElementCollection;
 import jakarta.persistence.Entity;
-import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
-import jakarta.persistence.ManyToMany;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.OrderColumn;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 import jakarta.persistence.Version;
+import org.hibernate.annotations.TenantId;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -24,6 +20,10 @@ public class ReadingItem {
 	@Id
 	@Column(name = "id", length = 36, nullable = false, columnDefinition = "varchar(36)")
 	private String id;
+
+	@TenantId
+	@Column(name = "owner_id", length = 36)
+	private String ownerId;
 
 	@Column(name = "title", length = 1024, nullable = false, columnDefinition = "varchar(1024)")
 	private String title;
@@ -64,17 +64,10 @@ public class ReadingItem {
 	@Column(name = "cover_source_url", length = 2048, columnDefinition = "varchar(2048)")
 	private String coverSourceUrl;
 
-	@ManyToMany(fetch = FetchType.LAZY)
-	@jakarta.persistence.JoinTable(name = "hub_reading_item_author",
-		joinColumns = @JoinColumn(name = "reading_item_id"),
-		inverseJoinColumns = @JoinColumn(name = "author_id"))
-	@org.hibernate.annotations.BatchSize(size = 100)
+	@Transient
 	private Set<ReadingAuthor> authors = new LinkedHashSet<>();
 
-	@ElementCollection(fetch = FetchType.LAZY)
-	@CollectionTable(name = "hub_reading_item_tag", joinColumns = @JoinColumn(name = "reading_item_id"))
-	@OrderColumn(name = "tag_order")
-	@Column(name = "tag", length = 64, nullable = false, columnDefinition = "varchar(64)")
+	@Transient
 	private List<String> tags = new ArrayList<>();
 
 	@Version
@@ -177,6 +170,7 @@ public class ReadingItem {
 		this.authors = new LinkedHashSet<>(authors);
 		this.updatedAt = now;
 	}
+	public void restoreTags(List<String> tags) { this.tags = new ArrayList<>(tags == null ? List.of() : tags); }
 
 	public String getId() { return id; }
 	public String getTitle() { return title; }

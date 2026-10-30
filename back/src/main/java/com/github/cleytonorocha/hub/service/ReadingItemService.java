@@ -6,13 +6,17 @@ import com.github.cleytonorocha.hub.dto.ReadingItemDtos.SearchResponse;
 import com.github.cleytonorocha.hub.dto.ReadingItemDtos.AuthorView;
 import com.github.cleytonorocha.hub.dto.ReadingItemDtos.UpdateRequest;
 import com.github.cleytonorocha.hub.entity.ReadingItem;
+import com.github.cleytonorocha.hub.entity.ReadingItemAuthorLink;
 import com.github.cleytonorocha.hub.entity.ReadingAuthor;
 import com.github.cleytonorocha.hub.entity.ReadingItemType;
 import com.github.cleytonorocha.hub.entity.ReadingStatus;
 import com.github.cleytonorocha.hub.repository.ReadingItemRepository;
 import com.github.cleytonorocha.hub.repository.ReadingAuthorRepository;
+import com.github.cleytonorocha.hub.security.AuthContext;
 import jakarta.persistence.criteria.Expression;
 import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Root;
+import jakarta.persistence.criteria.Subquery;
 import java.net.URI;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -46,13 +50,15 @@ public class ReadingItemService {
 	private final ReadingCollectionRevision collectionRevision;
 	private final ReadingCoverStorageService covers;
 	private final ReadingAuthorRepository authors;
+	private final ReadingItemAssociationService associations;
 	private final GoogleCoverImportService googleCovers;
 
-	public ReadingItemService(ReadingItemRepository items, ReadingCollectionRevision collectionRevision, ReadingCoverStorageService covers, ReadingAuthorRepository authors, GoogleCoverImportService googleCovers) {
+	public ReadingItemService(ReadingItemRepository items, ReadingCollectionRevision collectionRevision, ReadingCoverStorageService covers, ReadingAuthorRepository authors, ReadingItemAssociationService associations, GoogleCoverImportService googleCovers) {
 		this.items = items;
 		this.collectionRevision = collectionRevision;
 		this.covers = covers;
 		this.authors = authors;
+		this.associations = associations;
 		this.googleCovers = googleCovers;
 	}
 
@@ -68,25 +74,35 @@ public class ReadingItemService {
 		Specification<ReadingItem> specification = (root, criteria, builder) -> {
 			Predicate predicate = builder.equal(root.get("archived"), archived);
 			if (!normalized.isEmpty()) {
-				criteria.distinct(true);
 				String pattern = "%" + escapeLike(normalized) + "%";
 				Predicate title = builder.like(normalize(builder, root.get("title")), pattern, '\\');
 				Predicate source = builder.like(normalize(builder, root.get("authorOrSource")), pattern, '\\');
 				Predicate note = builder.like(normalize(builder, root.get("note")), pattern, '\\');
-				Predicate author = builder.like(normalize(builder, root.join("authors", jakarta.persistence.criteria.JoinType.LEFT).get("name")), pattern, '\\');
+				Subquery<Integer> authorMatch = criteria.subquery(Integer.class);
+				Root<ReadingItemAuthorLink> link = authorMatch.from(ReadingItemAuthorLink.class);
+				Root<ReadingAuthor> authorEntity = authorMatch.from(ReadingAuthor.class);
+				authorMatch.select(builder.literal(1)).where(
+					builder.equal(link.get("readingItemId"), root.get("id")),
+					builder.equal(link.get("authorId"), authorEntity.get("id")),
+					builder.like(normalize(builder, authorEntity.get("name")), pattern, '\\'));
+				Predicate author = builder.exists(authorMatch);
 				predicate = builder.and(predicate, builder.or(title, source, note, author));
 			}
 			if (statusFilter != null) predicate = builder.and(predicate, builder.equal(root.get("status"), statusFilter.name()));
 			if (typeFilter != null) predicate = builder.and(predicate, builder.equal(root.get("type"), typeFilter.name()));
 			if (authorId != null && !authorId.isBlank()) {
-				criteria.distinct(true);
-				predicate = builder.and(predicate, builder.equal(root.join("authors").get("id"), authorId));
+				Subquery<Integer> authorFilter = criteria.subquery(Integer.class);
+				Root<ReadingItemAuthorLink> link = authorFilter.from(ReadingItemAuthorLink.class);
+				authorFilter.select(builder.literal(1)).where(
+					builder.equal(link.get("readingItemId"), root.get("id")), builder.equal(link.get("authorId"), authorId));
+				predicate = builder.and(predicate, builder.exists(authorFilter));
 			}
 			return predicate;
 		};
 		Sort sort = Sort.by(Sort.Order.desc("updatedAt"), Sort.Order.asc("id"));
 		Page<ReadingItem> result = items.findAll(specification, PageRequest.of(page, size, sort));
-		List<ReadingItem> hydrated = result.isEmpty() ? List.of() : items.findAllWithTagsAndAuthorsByIdIn(result.getContent().stream().map(ReadingItem::getId).toList());
+		List<ReadingItem> hydrated = result.isEmpty() ? List.of() : items.findAllByIdIn(result.getContent().stream().map(ReadingItem::getId).toList());
+		associations.populate(hydrated);
 		Map<String, ReadingItem> hydratedById = new LinkedHashMap<>();
 		for (ReadingItem item : hydrated) hydratedById.putIfAbsent(item.getId(), item);
 		List<ItemView> content = result.getContent().stream().map(item -> ItemView.from(hydratedById.get(item.getId()))).toList();
@@ -122,6 +138,7 @@ public class ReadingItemService {
 		ReadingItem created = items.saveAndFlush(item);
 		created.replaceAuthors(resolveAuthors(request.authorIds(), request.type()), Instant.now());
 		created = items.saveAndFlush(created);
+		associations.save(created);
 		collectionRevision.increment();
 		return ItemView.from(created);
 	}
@@ -130,6 +147,9 @@ public class ReadingItemService {
 	public ItemView update(String id, UpdateRequest request) {
 		collectionRevision.lock();
 		ReadingItem item = find(id);
+		if (Boolean.TRUE.equals(request.archived()) != item.isArchived() && !AuthContext.hasPermission("READING_ARCHIVE")) {
+			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Seu perfil não permite arquivar ou restaurar conteúdo.");
+		}
 		if (request.revision() == null || item.getRevision() != request.revision()) {
 			throw new ResponseStatusException(HttpStatus.CONFLICT, "Este conteúdo foi alterado em outra janela. Recarregue-o antes de salvar.");
 		}
@@ -141,6 +161,7 @@ public class ReadingItemService {
 			Boolean.TRUE.equals(request.archived()), Instant.now());
 		if (request.authorIds() != null || request.type() != ReadingItemType.BOOK) item.replaceAuthors(resolveAuthors(request.authorIds(), request.type()), Instant.now());
 		ReadingItem updated = items.saveAndFlush(item);
+		associations.save(updated);
 		collectionRevision.increment();
 		return ItemView.from(updated);
 	}
@@ -247,7 +268,9 @@ public class ReadingItemService {
 	}
 
 	private ReadingItem find(String id) {
-		return items.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Conteúdo não encontrado."));
+		ReadingItem item = items.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Conteúdo não encontrado."));
+		associations.populate(List.of(item));
+		return item;
 	}
 
 	private List<String> normalizeTags(List<String> input) {
