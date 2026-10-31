@@ -2,7 +2,6 @@
 import { computed, ref } from 'vue'
 import { useTaskHub } from '../services/taskHub'
 import { exportTaskCopy, importTaskCopy, MAX_FILE_BYTES, previewTaskCopy } from '../services/taskBackup'
-import { hasPermission } from '../services/auth'
 
 const { state, refreshTasks } = useTaskHub()
 const exporting = ref(false)
@@ -13,13 +12,8 @@ const preview = ref(null)
 const error = ref('')
 const status = ref('')
 const localTaskCount = computed(() => state.tasks.filter((task) => task.type === 'LOCAL').length)
-const newRecordCount = computed(() => (preview.value?.newTasks || 0) + (preview.value?.newReadingItems || 0) + (preview.value?.newAuthors || 0) + (preview.value?.newHabits || 0) + (preview.value?.newFocusSessions || 0) + (preview.value?.notes?.newNotes || 0))
+const hasPreferenceChanges = computed(() => Object.keys(preview.value?.preferencesToReplace || {}).length > 0)
 const maxSelectedSize = computed(() => selectedFile.value?.name.toLowerCase().endsWith('.zip') ? MAX_FILE_BYTES : 5 * 1024 * 1024)
-const exportOmissions = computed(() => [
-  ['HABITS_READ', 'Hábitos e rotinas'],
-  ['FOCUS_READ', 'Sessões de foco'],
-  ['NOTES_READ', 'Notas e conhecimento'],
-].filter(([permission]) => !hasPermission(permission)).map(([, label]) => label))
 const previewOmissions = computed(() => (preview.value?.omittedSections || []).map((section) => ({
   habits: 'hábitos',
   focusSessions: 'sessões de foco',
@@ -52,9 +46,7 @@ async function exportCopy() {
   status.value = ''
   try {
     const bytes = await exportTaskCopy()
-    status.value = exportOmissions.value.length
-      ? `Cópia parcial pronta para salvar (${formatBytes(bytes)}). Não inclui ${formatList(exportOmissions.value)}, porque seu perfil não permite exportá-los. O Hub não consegue confirmar onde o navegador a salvou.`
-      : `Arquivo pronto para salvar (${formatBytes(bytes)}). O Hub não consegue confirmar onde o navegador o salvou.`
+    status.value = `Cópia pronta para salvar (${formatBytes(bytes)}). O Hub não consegue confirmar onde o navegador a salvou.`
   } catch (cause) {
     error.value = cause.message
   } finally {
@@ -86,7 +78,7 @@ async function confirmImport() {
     const result = await importTaskCopy(selectedFile.value, preview.value.token)
     if (result.status === 'REVIEW_REQUIRED') {
       preview.value = result.preview
-      status.value = 'Os dados locais mudaram. Revise a prévia atualizada antes de confirmar.'
+      status.value = 'Os dados locais ou as preferências mudaram. Revise a prévia atualizada antes de confirmar.'
       return
     }
     const successParts = []
@@ -95,6 +87,7 @@ async function confirmImport() {
     if (result.addedAuthors) successParts.push(`${result.addedAuthors} ${result.addedAuthors === 1 ? 'autor adicionado' : 'autores adicionados'}`)
     if (result.addedFocusSessions) successParts.push(`${result.addedFocusSessions} ${result.addedFocusSessions === 1 ? 'sessão de foco adicionada' : 'sessões de foco adicionadas'}`)
     if (result.addedNotes) successParts.push(`${result.addedNotes} ${result.addedNotes === 1 ? 'nota adicionada' : 'notas adicionadas'}`)
+    if (result.replacedPreferenceKeys?.length) successParts.push(`preferências substituídas: ${formatList(result.replacedPreferenceKeys.map(preferenceLabel))}`)
     if (result.identicalTasks) successParts.push(`${result.identicalTasks} ${result.identicalTasks === 1 ? 'task idêntica ignorada' : 'tasks idênticas ignoradas'}`)
     if (result.identicalReadingItems) successParts.push(`${result.identicalReadingItems} ${result.identicalReadingItems === 1 ? 'conteúdo idêntico ignorado' : 'conteúdos idênticos ignorados'}`)
     if (result.identicalFocusSessions) successParts.push(`${result.identicalFocusSessions} ${result.identicalFocusSessions === 1 ? 'sessão de foco idêntica ignorada' : 'sessões de foco idênticas ignoradas'}`)
@@ -134,21 +127,27 @@ function formatBytes(bytes) {
 function formatGeneratedAt(value) {
   return new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value))
 }
+
+function preferenceLabel(key) {
+  return ({
+    weeklySummaryVisible: 'resumo semanal', videoDownloaderCardVisible: 'cartão de downloads', sidebarPinned: 'menu lateral fixado',
+    taskDefaults: 'padrões de tarefas', calendarPresentations: 'apresentações do calendário',
+  })[key] || key
+}
 </script>
 
 <template>
   <section class="task-backup-panel" aria-labelledby="task-backup-title">
     <header class="settings-section-heading">
       <div><p class="settings-section-kicker">DADOS</p><h2 id="task-backup-title">Cópia portátil do Hub</h2></div>
-        <p>Exporte ou adicione tarefas, Biblioteca, hábitos, sessões de foco e notas permitidos pelo seu perfil. Capas ficam no pacote ZIP; cópias antigas continuam aceitas.</p>
+        <p>Exporte ou adicione todos os seus dados pessoais do Hub. A permissão de cópia portátil dá acesso a essas áreas apenas neste fluxo, sem alterar as permissões normais dos módulos.</p>
     </header>
 
     <div class="task-backup-card">
       <div class="task-backup-copy">
         <h3>Exportar cópia portátil</h3>
-        <p>Inclui tasks locais, séries, checklists, biblioteca, hábitos, sessões de foco e notas se seu perfil tiver as permissões correspondentes. Sessões ativas são congeladas como pausadas na cópia; a sessão original continua. Não inclui preferências, credenciais, dados Google ou downloads.</p>
+        <p>Inclui tarefas locais, séries, checklists, biblioteca, autores, etiquetas, capas, hábitos, sessões de foco, notas e preferências pessoais. Sessões ativas são congeladas como pausadas na cópia; a sessão original continua. Não inclui dados ou credenciais Google Tasks, contas e perfis Hub, segredos de autenticação, configurações globais ou downloads temporários.</p>
         <p class="settings-storage-note">{{ localTaskCount }} {{ localTaskCount === 1 ? 'task local' : 'tasks locais' }} · Limite: 5.000 tarefas, conteúdos, hábitos e notas; 50.000 sessões; manifesto de 90 MiB e pacote de 100 MiB.</p>
-        <p v-if="exportOmissions.length" class="task-backup-partial-warning" role="status" aria-live="polite">Sua permissão não permite incluir: {{ formatList(exportOmissions) }}. A cópia será parcial.</p>
       </div>
       <button class="task-primary-button" type="button" :disabled="exporting || state.loading" @click="exportCopy">
         {{ exporting ? 'Preparando…' : 'Exportar cópia' }}
@@ -175,9 +174,14 @@ function formatGeneratedAt(value) {
       <section v-if="preview" class="task-backup-preview" aria-live="polite" aria-labelledby="task-backup-preview-title">
         <h4 id="task-backup-preview-title">Revisão da cópia</h4>
         <p>Versão {{ preview.formatVersion }} · Gerada em {{ formatGeneratedAt(preview.generatedAt) }} · {{ preview.totalTasks }} tarefas · {{ preview.totalReadingItems }} conteúdos de leitura<span v-if="preview.formatVersion >= 8"> · {{ preview.totalHabits }} hábitos</span><span v-if="preview.formatVersion >= 9"> · {{ preview.totalFocusSessions }} sessões de foco</span><span v-if="preview.formatVersion >= 10"> · {{ preview.notes?.totalNotes || 0 }} notas</span></p>
-        <p v-if="previewOmissions.length" class="task-backup-partial-warning" role="status" aria-live="polite">Cópia parcial: este arquivo não inclui {{ formatList(previewOmissions) }}. Importar continua aditivo; áreas omitidas não removem dados existentes.</p>
+        <p v-if="previewOmissions.length" class="task-backup-partial-warning" role="status" aria-live="polite">Este arquivo não inclui {{ formatList(previewOmissions) }}. Importar continua aditivo; áreas ausentes não removem dados existentes.</p>
         <p v-if="preview.formatVersion >= 5">{{ preview.totalCovers }} capas no pacote · {{ preview.newCovers }} novas · {{ preview.identicalCovers }} já existentes e idênticas.</p>
         <p v-else>Esta cópia JSON antiga não contém imagens de capa; os registros importados ficarão sem capa.</p>
+        <div v-if="Object.keys(preview.preferencesToReplace || {}).length" class="task-backup-preferences" aria-label="Preferências que serão substituídas">
+          <h5>Preferências que serão substituídas</h5>
+          <ul><li v-for="(value, key) in preview.preferencesToReplace" :key="key"><strong>{{ preferenceLabel(key) }}</strong>: <code>{{ JSON.stringify(value) }}</code></li></ul>
+          <p>As preferências atuais só serão alteradas ao confirmar a importação.</p>
+        </div>
         <dl class="task-backup-counts">
           <div><dt>Novas</dt><dd>{{ preview.newTasks }}</dd></div>
           <div><dt>Já existentes</dt><dd>{{ preview.identicalTasks }}</dd></div>
@@ -236,9 +240,9 @@ function formatGeneratedAt(value) {
         <p v-if="preview.notes?.conflictingNotes" class="task-backup-conflicts task-form-error" role="alert">Há notas com o mesmo identificador e conteúdo diferente. Nenhum registro será importado.</p>
         <p v-if="preview.notes?.limitExceeded" class="task-backup-conflicts task-form-error" role="alert">A importação ultrapassaria o limite de 5.000 notas. Remova notas antes de importar esta cópia.</p>
         <p v-if="preview.focusSlotConflict" class="task-backup-conflicts task-form-error" role="alert">Já existe uma sessão ativa ou pausada. Encerre-a ou retome-a antes de importar; nenhum dado será importado parcialmente.</p>
-        <p v-if="!newRecordCount && !preview.conflictingTasks && !preview.conflictingReadingItems && !preview.conflictingHabits && !preview.conflictingFocusSessions && !preview.focusSlotConflict && !preview.notes?.conflictingNotes && !preview.notes?.limitExceeded" class="task-backup-note">Não há registros novos para adicionar.</p>
+        <p v-if="!newRecordCount && !hasPreferenceChanges && !preview.conflictingTasks && !preview.conflictingReadingItems && !preview.conflictingHabits && !preview.conflictingFocusSessions && !preview.focusSlotConflict && !preview.notes?.conflictingNotes && !preview.notes?.limitExceeded" class="task-backup-note">Não há registros ou preferências novas para aplicar.</p>
         <button v-if="preview.canImport" class="task-primary-button" type="button" :disabled="working" @click="confirmImport">
-          {{ working ? 'Adicionando…' : `Adicionar ${newRecordCount} registros` }}
+          {{ working ? 'Importando…' : hasPreferenceChanges ? 'Confirmar importação e atualizar preferências' : 'Confirmar importação' }}
         </button>
       </section>
     </div>

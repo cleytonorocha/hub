@@ -30,7 +30,7 @@ public class TaskBackupController {
 	public TaskBackupController(TaskBackupService backups) { this.backups = backups; }
 
 	@GetMapping("/export")
-	@PreAuthorize("hasAuthority('TASK_READ') and hasAuthority('READING_READ')")
+	@PreAuthorize("hasAuthority('PORTABLE_COPY')")
 	public ResponseEntity<StreamingResponseBody> export() {
 		PortableCopy copy = backups.exportPortableCopy();
 		String filename = copy.zipped() ? "hub-portable-copy.zip" : "hub-portable-copy.json";
@@ -52,7 +52,7 @@ public class TaskBackupController {
 	}
 
 	@PostMapping(value = "/preview", consumes = {MediaType.APPLICATION_JSON_VALUE, "application/zip"})
-	@PreAuthorize("isAuthenticated()")
+	@PreAuthorize("hasAuthority('PORTABLE_COPY')")
 	public Preview preview(HttpServletRequest request) throws IOException {
 		if (isJson(request)) return backups.preview(readBoundedJson(request));
 		Path file = receivePackage(request);
@@ -61,7 +61,7 @@ public class TaskBackupController {
 	}
 
 	@PostMapping(value = "/import", consumes = {MediaType.APPLICATION_JSON_VALUE, "application/zip"})
-	@PreAuthorize("isAuthenticated()")
+	@PreAuthorize("hasAuthority('PORTABLE_COPY')")
 	public Confirmation confirm(@RequestHeader(name = "X-Task-Import-Preview", required = false) String token,
 			HttpServletRequest request) throws IOException {
 		if (token == null || token.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Revise o arquivo antes de importá-lo.");

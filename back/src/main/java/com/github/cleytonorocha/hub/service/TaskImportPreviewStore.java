@@ -3,6 +3,7 @@ package com.github.cleytonorocha.hub.service;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
 
@@ -14,10 +15,15 @@ public final class TaskImportPreviewStore {
 
 	public synchronized String put(String ownerId, String digest, long taskRevision, long readingRevision, long habitRevision, long noteRevision,
 			PortableCopyClassificationSnapshot classification) {
+		return put(ownerId, digest, taskRevision, readingRevision, habitRevision, noteRevision, 0, Map.of(), classification);
+	}
+
+	public synchronized String put(String ownerId, String digest, long taskRevision, long readingRevision, long habitRevision, long noteRevision,
+			long preferenceRevision, Map<String, Object> preferencesToReplace, PortableCopyClassificationSnapshot classification) {
 		purgeExpired();
 		while (entries.size() >= MAX_ENTRIES) entries.remove(entries.keySet().iterator().next());
 		String token = UUID.randomUUID().toString();
-		entries.put(token, new Entry(ownerId, digest, taskRevision, readingRevision, habitRevision, noteRevision, classification, Instant.now()));
+		entries.put(token, new Entry(ownerId, digest, taskRevision, readingRevision, habitRevision, noteRevision, preferenceRevision, preferencesToReplace, classification, Instant.now()));
 		return token;
 	}
 
@@ -35,5 +41,5 @@ public final class TaskImportPreviewStore {
 	}
 
 	public record Entry(String ownerId, String digest, long taskRevision, long readingRevision, long habitRevision, long noteRevision,
-		PortableCopyClassificationSnapshot classification, Instant createdAt) {}
+		long preferenceRevision, Map<String, Object> preferencesToReplace, PortableCopyClassificationSnapshot classification, Instant createdAt) {}
 }
