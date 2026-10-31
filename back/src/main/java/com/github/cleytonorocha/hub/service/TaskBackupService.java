@@ -27,6 +27,8 @@ import java.util.zip.ZipOutputStream;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.server.ResponseStatusException;
@@ -86,7 +88,7 @@ public class TaskBackupService {
 	public static final int MAX_HABITS = 5_000;
 	public static final int MAX_FOCUS_SESSIONS = 50_000;
 	public static final int MAX_NOTES = 5_000;
-	private static final int FORMAT_VERSION = 11;
+	private static final int FORMAT_VERSION = 12;
 	private static final int LEGACY_FORMAT_VERSION = 4;
 	private static final Set<String> ROOT_FIELDS_V1 = Set.of("formatVersion", "generatedAt", "tasks");
 	private static final Set<String> ROOT_FIELDS_V2_V3 = Set.of("formatVersion", "generatedAt", "tasks", "series");
@@ -97,6 +99,7 @@ public class TaskBackupService {
 	private static final Set<String> ROOT_FIELDS_V9 = Set.of("formatVersion", "generatedAt", "tasks", "series", "readingItems", "authors", "habits", "focusSessions");
 	private static final Set<String> ROOT_FIELDS_V10 = Set.of("formatVersion", "generatedAt", "tasks", "series", "readingItems", "authors", "habits", "focusSessions", "notes");
 	private static final Set<String> ROOT_FIELDS_V11 = Set.of("formatVersion", "generatedAt", "tasks", "series", "readingItems", "authors", "habits", "focusSessions", "notes", "omittedSections");
+	private static final Set<String> ROOT_FIELDS_V12 = Set.of("formatVersion", "generatedAt", "tasks", "series", "readingItems", "authors", "habits", "focusSessions", "notes", "omittedSections", "preferences");
 	private static final List<String> OMITTABLE_SECTION_ORDER = List.of("habits", "focusSessions", "notes");
 	private static final Set<String> OMITTABLE_SECTIONS = Set.copyOf(OMITTABLE_SECTION_ORDER);
 	private static final Set<String> HABIT_FIELDS = Set.of("id", "name", "startDate", "createdAt", "updatedAt", "schedules", "pauses", "checkIns");
@@ -135,13 +138,17 @@ public class TaskBackupService {
 	private final NoteRepository notes;
 	private final NoteService noteService;
 	private final NoteCollectionRevision noteCollectionRevision;
+	private final UserPreferenceService userPreferences;
+	private final PortableCopyArchiveCodec archiveCodec;
+	private final TransactionTemplate transactionTemplate;
 
 	public TaskBackupService(TaskRepository tasks, TaskSeriesRepository series, ReadingItemRepository readingItems,
 		TaskChecklistService checklists, TaskCollectionRevision collectionRevision, ReadingCollectionRevision readingCollectionRevision,
 		TaskImportPreviewStore previews, ObjectMapper mapper, ReadingCoverStorageService covers, ReadingAuthorRepository authors,
 		ReadingItemAssociationService readingAssociations, HabitRepository habits, HabitScheduleRepository habitSchedules,
 		HabitPauseRepository habitPauses, HabitCheckInRepository habitCheckIns, HabitCollectionRevision habitCollectionRevision,
-		FocusSessionRepository focusSessions, NoteRepository notes, NoteService noteService, NoteCollectionRevision noteCollectionRevision) {
+		FocusSessionRepository focusSessions, NoteRepository notes, NoteService noteService, NoteCollectionRevision noteCollectionRevision,
+		UserPreferenceService userPreferences, PortableCopyArchiveCodec archiveCodec, PlatformTransactionManager transactionManager) {
 		this.tasks = tasks;
 		this.series = series;
 		this.readingItems = readingItems;
@@ -162,26 +169,51 @@ public class TaskBackupService {
 		this.notes = notes;
 		this.noteService = noteService;
 		this.noteCollectionRevision = noteCollectionRevision;
+		this.userPreferences = userPreferences;
+		this.archiveCodec = archiveCodec;
+		this.transactionTemplate = new TransactionTemplate(transactionManager);
 	}
 
-	@Transactional
 	public PortableCopy exportPortableCopy() {
-		if (!AuthContext.hasPermission("TASK_READ") || !AuthContext.hasPermission("READING_READ"))
-			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "É necessário acesso de leitura em todas as áreas base para exportar a cópia.");
-		collectionRevision.lock();
-		readingCollectionRevision.lock();
-		habitCollectionRevision.lock();
-		noteCollectionRevision.lock();
-		String ownerId = AuthContext.userId();
-		Instant snapshotAt = Instant.now();
-		List<String> omittedSections = new ArrayList<>();
-		List<BackupFocusSession> portableFocusSessions = List.of();
-		if (AuthContext.hasPermission("FOCUS_READ")) {
-			focusSessions.lockOwnerSlot(ownerId);
-			List<com.github.cleytonorocha.hub.dto.FocusSessionDtos.SessionView> localFocusSessions = focusSessions.allForCopy(ownerId);
-			if (localFocusSessions.size() > MAX_FOCUS_SESSIONS) throw tooLarge("A cópia excede o limite de 50.000 sessões de foco.");
-			portableFocusSessions = localFocusSessions.stream().map(session -> toBackupFocusSession(session, snapshotAt)).toList();
-		} else omittedSections.add("focusSessions");
+		CopySnapshot snapshot = transactionTemplate.execute(status -> capturePortableSnapshot());
+		if (snapshot == null) throw new IllegalStateException("Não foi possível capturar a cópia portátil.");
+		Path archive = null;
+		try {
+			BackupFile file = snapshot.file();
+			Map<String, byte[]> sections = new LinkedHashMap<>();
+			sections.put("tasks", mapper.writeValueAsBytes(file.tasks()));
+			sections.put("series", mapper.writeValueAsBytes(file.series()));
+			sections.put("readingItems", mapper.writeValueAsBytes(file.readingItems()));
+			sections.put("authors", mapper.writeValueAsBytes(file.authors()));
+			sections.put("habits", mapper.writeValueAsBytes(file.habits()));
+			sections.put("focusSessions", mapper.writeValueAsBytes(file.focusSessions()));
+			sections.put("notes", mapper.writeValueAsBytes(file.notes()));
+			sections.put("preferences", mapper.writeValueAsBytes(file.preferences()));
+			long expanded = sections.values().stream().mapToLong(bytes -> bytes.length).sum();
+			if (expanded > MAX_PACKAGE_EXPANDED_BYTES) throw tooLarge("Os dados descompactados excedem 100 MiB; nenhuma cópia parcial foi exportada.");
+			byte[] manifest = archiveCodec.manifestBytes(file.generatedAt().toString(), sections, snapshot.stagedAssets());
+			if (manifest.length > MAX_MANIFEST_BYTES) throw tooLarge("O manifesto da cópia excede 90 MiB e não foi exportado.");
+			expanded += manifest.length;
+			for (Path asset : snapshot.stagedAssets().values()) expanded += Files.size(asset);
+			if (expanded > MAX_PACKAGE_EXPANDED_BYTES) throw tooLarge("Os dados descompactados excedem 100 MiB; nenhuma cópia parcial foi exportada.");
+			archive = Files.createTempFile("hub-portable-copy-", ".zip");
+			archiveCodec.write(archive, manifest, sections, snapshot.stagedAssets());
+			long length = Files.size(archive);
+			if (length > MAX_PACKAGE_BYTES) throw tooLarge("A cópia excede o limite de 100 MiB e não foi exportada.");
+			return PortableCopy.zip(archive, length);
+		} catch (ResponseStatusException error) { deleteTemporary(archive); throw error; }
+		catch (Exception error) { deleteTemporary(archive); throw new IllegalStateException("Não foi possível preparar a cópia portátil completa do Hub.", error); }
+		finally { deleteTree(snapshot.staging()); }
+	}
+
+	private CopySnapshot capturePortableSnapshot() {
+		requirePortableCopyPermission();
+		collectionRevision.lock(); readingCollectionRevision.lock(); habitCollectionRevision.lock(); noteCollectionRevision.lock();
+		String ownerId = AuthContext.userId(); Instant snapshotAt = Instant.now();
+		focusSessions.lockOwnerSlot(ownerId);
+		List<com.github.cleytonorocha.hub.dto.FocusSessionDtos.SessionView> localFocusSessions = focusSessions.allForCopy(ownerId);
+		if (localFocusSessions.size() > MAX_FOCUS_SESSIONS) throw tooLarge("A cópia excede o limite de 50.000 sessões de foco.");
+		List<BackupFocusSession> portableFocusSessions = localFocusSessions.stream().map(session -> toBackupFocusSession(session, snapshotAt)).toList();
 		List<Task> localTasks = tasks.findAllByTypeOrderByIdAsc(Task.Type.LOCAL);
 		if (localTasks.size() > MAX_TASKS) throw tooLarge("A cópia excede o limite de 5.000 tarefas.");
 		List<BackupSeries> localSeries = series.findAll().stream().map(this::toBackupSeries).toList();
@@ -189,52 +221,30 @@ public class TaskBackupService {
 		if (localReadingItems.size() > MAX_READING_ITEMS) throw tooLarge("A cópia excede o limite de 5.000 itens de leitura.");
 		localReadingItems = loadReadingItemsWithTags(localReadingItems);
 		List<BackupReadingItem> portableReadings = localReadingItems.stream().map(item -> toBackupReadingItem(item, true, ownerId)).toList();
-		List<BackupAuthor> portableAuthors = authors.findAllByOrderByNormalizedNameAscIdAsc().stream()
-			.map(author -> new BackupAuthor(author.getId(), author.getName())).toList();
-		List<BackupHabit> portableHabits = List.of();
-		if (AuthContext.hasPermission("HABITS_READ")) portableHabits = exportHabits();
-		else omittedSections.add("habits");
-		List<BackupNote> portableNotes = List.of();
-		if (AuthContext.hasPermission("NOTES_READ")) portableNotes = exportNotes(localTasks);
-		else omittedSections.add("notes");
-		omittedSections.sort(java.util.Comparator.comparingInt(OMITTABLE_SECTION_ORDER::indexOf));
-		BackupFile file = new BackupFile(FORMAT_VERSION, Instant.now(), localTasks.stream().map(this::toBackupTask).toList(),
-			localSeries, portableReadings, portableAuthors, portableHabits, portableFocusSessions, portableNotes, omittedSections);
-		byte[] manifest;
-		try { manifest = mapper.writeValueAsBytes(file); }
-		catch (Exception error) { throw new IllegalStateException("Não foi possível preparar a cópia portátil do Hub."); }
-		if (manifest.length > MAX_MANIFEST_BYTES) throw tooLarge("O manifesto da cópia excede 90 MiB e não foi exportado.");
-		Path archive = null;
+		List<BackupAuthor> portableAuthors = authors.findAllByOrderByNormalizedNameAscIdAsc().stream().map(author -> new BackupAuthor(author.getId(), author.getName())).toList();
+		List<BackupHabit> portableHabits = exportHabits(); List<BackupNote> portableNotes = exportNotes(localTasks);
+		Map<String, Object> prefDocument = userPreferences.lockAndGet(ownerId).preferences();
+		Path staging = null;
 		try {
-			archive = Files.createTempFile("hub-portable-copy-", ".zip");
-			Map<String, ReadingItem> readingById = new LinkedHashMap<>();
-			for (ReadingItem item : localReadingItems) readingById.put(item.getId(), item);
-			long expandedSize = manifest.length;
-			try (ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(archive))) {
-				putZipEntry(zip, "manifest.json", manifest);
-				for (BackupReadingItem item : portableReadings) {
-					if (item.coverSha256() == null) continue;
-					ReadingItem reading = readingById.get(item.id());
-					byte[] image = covers.read(ownerId, reading.getCoverImageName(), false);
-					if (image.length != item.coverSize() || !sha256(image).equals(item.coverSha256())) {
-						throw new IllegalStateException("Uma imagem de capa mudou durante a exportação.");
-					}
-					expandedSize += image.length;
-					if (expandedSize > MAX_PACKAGE_EXPANDED_BYTES) throw tooLarge("As imagens excedem 100 MiB descompactadas; nenhuma cópia foi exportada.");
-					putZipEntry(zip, assetPath(item.id(), item.coverFormat()), image);
-					if (Files.size(archive) > MAX_PACKAGE_BYTES) throw tooLarge("A cópia excede o limite de 100 MiB e não foi exportada.");
-				}
+			staging = Files.createTempDirectory("hub-copy-export-staging-");
+			Path rollbackStaging = staging;
+			if (TransactionSynchronizationManager.isSynchronizationActive()) {
+				TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+					@Override public void afterCompletion(int status) { if (status != TransactionSynchronization.STATUS_COMMITTED) deleteTree(rollbackStaging); }
+				});
 			}
-			long length = Files.size(archive);
-			if (length > MAX_PACKAGE_BYTES) throw tooLarge("A cópia excede o limite de 100 MiB e não foi exportada.");
-			return PortableCopy.zip(archive, length);
-		} catch (ResponseStatusException error) {
-			deleteTemporary(archive);
-			throw error;
-		} catch (Exception error) {
-			deleteTemporary(archive);
-			throw new IllegalStateException("Não foi possível preparar a cópia portátil completa do Hub.", error);
-		}
+			Map<String, ReadingItem> readingById = new LinkedHashMap<>(); for (ReadingItem item : localReadingItems) readingById.put(item.getId(), item);
+			Map<String, Path> stagedAssets = new LinkedHashMap<>();
+			for (BackupReadingItem item : portableReadings) {
+				if (item.coverSha256() == null) continue;
+				ReadingItem reading = readingById.get(item.id()); byte[] image = covers.read(ownerId, reading.getCoverImageName(), false);
+				if (image.length != item.coverSize() || !sha256(image).equals(item.coverSha256())) throw new IllegalStateException("Uma imagem de capa mudou durante a exportação.");
+				stagedAssets.put(assetPath(item.id(), item.coverFormat()), Files.write(staging.resolve(UUID.randomUUID().toString()), image));
+			}
+			BackupFile file = new BackupFile(FORMAT_VERSION, snapshotAt, localTasks.stream().map(this::toBackupTask).toList(), localSeries,
+				portableReadings, portableAuthors, portableHabits, portableFocusSessions, portableNotes, List.of(), prefDocument);
+			return new CopySnapshot(file, staging, stagedAssets);
+		} catch (Exception error) { deleteTree(staging); if (error instanceof RuntimeException runtime) throw runtime; throw new IllegalStateException("Não foi possível capturar a cópia portátil.", error); }
 	}
 
 	@Transactional
@@ -252,6 +262,7 @@ public class TaskBackupService {
 	}
 
 	private Preview preview(DecodedBackup decoded) {
+		requirePortableCopyPermission();
 		requireTaskImportPermission(decoded);
 		requireReadingImportPermission(decoded);
 		requireHabitImportPermission(decoded);
@@ -261,13 +272,16 @@ public class TaskBackupService {
 		long readingRevision = readingCollectionRevision.lock();
 		long habitRevision = habitCollectionRevision.lock();
 		long noteRevision = noteCollectionRevision.lock();
+		UserPreferenceService.PreferenceSnapshot preferenceSnapshot = userPreferences.get(AuthContext.userId());
+		Map<String, Object> preferencesToReplace = preferenceChanges(decoded.file().preferences(), preferenceSnapshot.preferences());
 		List<Task> localTasks = tasks.findAllByTypeOrderByIdAsc(Task.Type.LOCAL);
 		TaskBackupClassification taskClassification = classifyTasks(decoded, localTasks);
 		ReadingBackupClassification readingClassification = classifyReadingItems(decoded, loadReadingItemsWithTags(readingItems.findAllByOrderByIdAsc()));
 		HabitBackupClassification habitClassification = classifyHabits(decoded, habits.findAllByOrderByStartDateAscCreatedAtAsc());
 		FocusBackupClassification focusClassification = classifyFocusSessions(decoded, focusSessions.allForCopy(AuthContext.userId()), currentActiveId());
 		NoteBackupClassification noteClassification = classifyNotes(decoded, taskClassification, noteService.loadForBackup());
-		return issuePreview(decoded, taskRevision, readingRevision, habitRevision, noteRevision, taskClassification, readingClassification, habitClassification, focusClassification, noteClassification);
+		return issuePreview(decoded, taskRevision, readingRevision, habitRevision, noteRevision, preferenceSnapshot.revision(), preferencesToReplace,
+			taskClassification, readingClassification, habitClassification, focusClassification, noteClassification);
 	}
 
 	@Transactional
@@ -285,6 +299,7 @@ public class TaskBackupService {
 	}
 
 	private Confirmation confirm(DecodedBackup decoded, String token) {
+		requirePortableCopyPermission();
 		requireTaskImportPermission(decoded);
 		requireReadingImportPermission(decoded);
 		requireHabitImportPermission(decoded);
@@ -302,6 +317,8 @@ public class TaskBackupService {
 		long habitRevision = habitCollectionRevision.lock();
 		long noteRevision = noteCollectionRevision.lock();
 		String ownerId = AuthContext.userId();
+		UserPreferenceService.PreferenceSnapshot preferenceSnapshot = userPreferences.get(ownerId);
+		Map<String, Object> currentPreferenceChanges = preferenceChanges(decoded.file().preferences(), preferenceSnapshot.preferences());
 		focusSessions.lockOwnerSlot(ownerId);
 		List<Task> localTasks = tasks.findAllByTypeOrderByIdAsc(Task.Type.LOCAL);
 		TaskBackupClassification currentTasks = classifyTasks(decoded, localTasks);
@@ -311,8 +328,10 @@ public class TaskBackupService {
 		NoteBackupClassification currentNotes = classifyNotes(decoded, currentTasks, noteService.loadForBackup());
 		PortableCopyClassificationSnapshot currentSnapshot = snapshot(currentTasks, currentReading, currentHabits, currentFocus, currentNotes);
 		if (taskRevision != entry.taskRevision() || readingRevision != entry.readingRevision() || habitRevision != entry.habitRevision() || noteRevision != entry.noteRevision()
+				|| preferenceSnapshot.revision() != entry.preferenceRevision() || !currentPreferenceChanges.equals(entry.preferencesToReplace())
 				|| !currentSnapshot.equals(entry.classification())) {
-			Preview refreshed = issuePreview(decoded, taskRevision, readingRevision, habitRevision, noteRevision, currentTasks, currentReading, currentHabits, currentFocus, currentNotes);
+			Preview refreshed = issuePreview(decoded, taskRevision, readingRevision, habitRevision, noteRevision, preferenceSnapshot.revision(), currentPreferenceChanges,
+				currentTasks, currentReading, currentHabits, currentFocus, currentNotes);
 			return new Confirmation("REVIEW_REQUIRED", refreshed, 0, 0, 0, 0, 0, 0);
 		}
 		if (!currentTasks.conflictIds().isEmpty() || !currentReading.conflictIds().isEmpty() || !currentHabits.conflictIds().isEmpty()
@@ -323,12 +342,12 @@ public class TaskBackupService {
 		List<BackupAuthor> newAuthors = decoded.file().authors() == null ? List.of() : decoded.file().authors().stream()
 			.filter(author -> !localAuthorIds.contains(author.id())).toList();
 		if (currentTasks.newTasks().isEmpty() && !missingSeries && currentReading.newItems().isEmpty() && newAuthors.isEmpty()
-				&& currentHabits.newHabits().isEmpty() && currentFocus.newSessions().isEmpty() && currentNotes.newNotes().isEmpty()) {
+				&& currentHabits.newHabits().isEmpty() && currentFocus.newSessions().isEmpty() && currentNotes.newNotes().isEmpty() && currentPreferenceChanges.isEmpty()) {
 			removePreviewAfterCommit(token);
 			return new Confirmation("IMPORTED", null, 0, currentTasks.identicalIds().size(), currentTasks.repeatedIdenticalIds(),
 				0, currentReading.identicalIds().size(), currentReading.repeatedIdenticalIds(), 0, newAuthors.size(),
 				0, currentHabits.identicalIds().size(), currentHabits.repeatedIdenticalIds(), 0, currentFocus.identicalIds().size(),
-				0, currentNotes.identicalIds().size(), currentNotes.repeatedIdenticalIds());
+				0, currentNotes.identicalIds().size(), currentNotes.repeatedIdenticalIds(), List.of());
 		}
 
 		List<TaskSeries> newSeries = (decoded.file().series() == null ? List.<BackupSeries>of() : decoded.file().series()).stream()
@@ -373,6 +392,7 @@ public class TaskBackupService {
 			notes.saveAll(noteAdditions);
 			notes.flush();
 			for (Note note : noteAdditions) noteService.saveImportedTags(note);
+			List<String> replacedPreferences = applyImportedPreferences(ownerId, preferenceSnapshot.revision(), decoded.file().preferences(), currentPreferenceChanges);
 			if (!newlyStoredCovers.isEmpty()) cleanupImportedCoversOnRollback(ownerId, newlyStoredCovers);
 			if (!additions.isEmpty() || !newSeries.isEmpty()) collectionRevision.increment();
 			if (!readingAdditions.isEmpty() || !newAuthors.isEmpty()) readingCollectionRevision.increment();
@@ -382,7 +402,7 @@ public class TaskBackupService {
 			return new Confirmation("IMPORTED", null, additions.size(), currentTasks.identicalIds().size(), currentTasks.repeatedIdenticalIds(),
 				readingAdditions.size(), currentReading.identicalIds().size(), currentReading.repeatedIdenticalIds(), newlyStoredCovers.size(), newAuthors.size(),
 				habitAdditions.size(), currentHabits.identicalIds().size(), currentHabits.repeatedIdenticalIds(),
-				currentFocus.newSessions().size(), currentFocus.identicalIds().size(), noteAdditions.size(), currentNotes.identicalIds().size(), currentNotes.repeatedIdenticalIds());
+				currentFocus.newSessions().size(), currentFocus.identicalIds().size(), noteAdditions.size(), currentNotes.identicalIds().size(), currentNotes.repeatedIdenticalIds(), replacedPreferences);
 		} catch (RuntimeException | IOException error) {
 			newlyStoredCovers.forEach(name -> covers.delete(ownerId, name));
 			if (error instanceof RuntimeException runtime) throw runtime;
@@ -391,6 +411,7 @@ public class TaskBackupService {
 	}
 
 	private Preview issuePreview(DecodedBackup decoded, long taskRevision, long readingRevision, long habitRevision, long noteRevision,
+			long preferenceRevision, Map<String, Object> preferencesToReplace,
 			TaskBackupClassification taskClassification, ReadingBackupClassification readingClassification, HabitBackupClassification habitClassification,
 			FocusBackupClassification focusClassification, NoteBackupClassification noteClassification) {
 		List<TaskSample> samples = taskClassification.newTasks().stream().limit(10)
@@ -419,7 +440,7 @@ public class TaskBackupService {
 			return (localById != null && !localById.getName().equals(author.name())) || (localByName != null && !localByName.getId().equals(author.id()));
 		}).count();
 		boolean hasNewItems = !taskClassification.newTasks().isEmpty() || !readingClassification.newItems().isEmpty() || !newAuthors.isEmpty()
-			|| !habitClassification.newHabits().isEmpty() || !focusClassification.newSessions().isEmpty() || !noteClassification.newNotes().isEmpty();
+			|| !habitClassification.newHabits().isEmpty() || !focusClassification.newSessions().isEmpty() || !noteClassification.newNotes().isEmpty() || !preferencesToReplace.isEmpty();
 		boolean noteLimitExceeded = notes.count() + noteClassification.newNotes().size() > MAX_NOTES;
 		int newCovers = (int) readingClassification.newItems().stream().filter(item -> item.coverSha256() != null).count();
 		int identicalCovers = (int) readingClassification.identicalIds().stream()
@@ -441,7 +462,7 @@ public class TaskBackupService {
 				noteClassification.conflictIds().size(), noteClassification.repeatedIdenticalIds(),
 				(int) noteClassification.newNotes().stream().filter(BackupNote::relatedTaskUnavailable).count(), noteLimitExceeded),
 			decoded.file().omittedSections());
-		String token = previews.put(AuthContext.userId(), decoded.digest(), taskRevision, readingRevision, habitRevision, noteRevision,
+		String token = previews.put(AuthContext.userId(), decoded.digest(), taskRevision, readingRevision, habitRevision, noteRevision, preferenceRevision, preferencesToReplace,
 			snapshot(taskClassification, readingClassification, habitClassification, focusClassification, noteClassification));
 		return new Preview(token, withoutToken.formatVersion(), withoutToken.generatedAt(), withoutToken.totalTasks(),
 			withoutToken.newTasks(), withoutToken.identicalTasks(), withoutToken.conflictingTasks(),
@@ -451,7 +472,7 @@ public class TaskBackupService {
 			withoutToken.readingConflicts(), withoutToken.readingConflictIds(), withoutToken.canImport(), withoutToken.totalCovers(),
 			withoutToken.newCovers(), withoutToken.identicalCovers(), withoutToken.totalAuthors(), withoutToken.newAuthors(), withoutToken.conflictingAuthors(),
 			withoutToken.totalHabits(), withoutToken.newHabits(), withoutToken.identicalHabits(), withoutToken.conflictingHabits(), withoutToken.repeatedIdenticalHabitIds(),
-			withoutToken.totalFocusSessions(), withoutToken.newFocusSessions(), withoutToken.identicalFocusSessions(), withoutToken.conflictingFocusSessions(), withoutToken.focusSlotConflict(), withoutToken.notes(), withoutToken.omittedSections());
+			withoutToken.totalFocusSessions(), withoutToken.newFocusSessions(), withoutToken.identicalFocusSessions(), withoutToken.conflictingFocusSessions(), withoutToken.focusSlotConflict(), withoutToken.notes(), withoutToken.omittedSections(), preferencesToReplace);
 	}
 
 	private PortableCopyClassificationSnapshot snapshot(TaskBackupClassification tasks, ReadingBackupClassification readings, HabitBackupClassification habits,
@@ -522,37 +543,43 @@ public class TaskBackupService {
 	}
 
 	private void requireTaskImportPermission(DecodedBackup decoded) {
-		if ((!decoded.file().tasks().isEmpty() || (decoded.file().series() != null && !decoded.file().series().isEmpty()))
-				&& !AuthContext.hasPermission("TASK_WRITE"))
-			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Seu perfil não pode importar tarefas.");
+		requirePortableCopyPermission();
 	}
 
 	private void requireReadingImportPermission(DecodedBackup decoded) {
-		if ((!decoded.file().readingItems().isEmpty() || (decoded.file().authors() != null && !decoded.file().authors().isEmpty()))
-				&& !AuthContext.hasPermission("READING_WRITE"))
-			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Seu perfil não pode importar itens de leitura.");
+		requirePortableCopyPermission();
 	}
 
 	private void requireFocusImportPermission(DecodedBackup decoded) {
-		if (!decoded.file().focusSessions().isEmpty()) {
-			if (!AuthContext.hasPermission("FOCUS_WRITE"))
-				throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Seu perfil não pode importar sessões de foco.");
-			if (decoded.file().focusSessions().stream().anyMatch(session -> session.taskId() != null) && !AuthContext.hasPermission("TASK_READ"))
-				throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Seu perfil não pode verificar os vínculos de tarefas das sessões de foco.");
-		}
+		requirePortableCopyPermission();
 	}
 
 	private void requireHabitImportPermission(DecodedBackup decoded) {
-		if (!decoded.file().habits().isEmpty() && !AuthContext.hasPermission("HABITS_WRITE"))
-			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Seu perfil não pode importar hábitos.");
+		requirePortableCopyPermission();
 	}
 
 	private void requireNoteImportPermission(DecodedBackup decoded) {
-		if (!decoded.file().notes().isEmpty()) {
-			if (!AuthContext.hasPermission("NOTES_WRITE")) throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Seu perfil não pode importar notas.");
-			if (decoded.file().notes().stream().anyMatch(note -> note.relatedTaskId() != null) && !AuthContext.hasPermission("TASK_READ"))
-				throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Seu perfil não pode verificar os vínculos de tarefas das notas.");
-		}
+		requirePortableCopyPermission();
+	}
+
+	private void requirePortableCopyPermission() {
+		if (!AuthContext.hasPermission("PORTABLE_COPY"))
+			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Seu perfil não pode exportar ou importar uma cópia completa dos próprios dados.");
+	}
+
+	private Map<String, Object> preferenceChanges(Map<String, Object> incoming, Map<String, Object> current) {
+		if (incoming == null) return Map.of();
+		Map<String, Object> changes = new LinkedHashMap<>();
+		for (String key : incoming.keySet()) if (!java.util.Objects.equals(incoming.get(key), current.get(key))) changes.put(key, incoming.get(key));
+		return Map.copyOf(changes);
+	}
+
+	private List<String> applyImportedPreferences(String ownerId, long expectedRevision, Map<String, Object> incoming,
+			Map<String, Object> changes) {
+		if (incoming == null || changes.isEmpty()) return List.of();
+		UserPreferenceService.SaveResult result = userPreferences.replaceFromPortableCopy(ownerId, expectedRevision, incoming);
+		if (!result.updated()) throw new ResponseStatusException(HttpStatus.CONFLICT, "As preferências mudaram depois da prévia. Revise o arquivo novamente.");
+		return changes.keySet().stream().sorted().toList();
 	}
 
 	private TaskBackupClassification classifyTasks(DecodedBackup decoded, List<Task> localTasks) {
@@ -703,6 +730,7 @@ public class TaskBackupService {
 	}
 
 	private DecodedBackup decodeZip(Path archive) {
+		if (archiveCodec.isVersion12(archive)) return decodeZipV12(archive);
 		Path staging = null;
 		try {
 			staging = Files.createTempDirectory("hub-copy-assets-");
@@ -746,6 +774,23 @@ public class TaskBackupService {
 		}
 	}
 
+	private DecodedBackup decodeZipV12(Path archive) {
+		Path staging = null;
+		try {
+			staging = Files.createTempDirectory("hub-copy-assets-");
+			PortableCopyArchiveCodec.Contents contents = archiveCodec.readVersion12(archive, staging);
+			Map<String, Object> root = new LinkedHashMap<>();
+			root.put("formatVersion", 12); root.put("generatedAt", contents.generatedAt());
+			for (String name : List.of("tasks", "series", "readingItems", "authors", "habits", "focusSessions", "notes")) {
+				root.put(name, mapper.readValue(contents.sections().get(name), new tools.jackson.core.type.TypeReference<List<Object>>() {}));
+			}
+			root.put("omittedSections", List.of());
+			root.put("preferences", mapper.readValue(contents.sections().get("preferences"), new tools.jackson.core.type.TypeReference<Map<String, Object>>() {}));
+			return decodeJson(mapper.writeValueAsBytes(root), true, contents.assets(), staging, digest(archive));
+		} catch (ResponseStatusException error) { deleteTree(staging); throw error; }
+		catch (Exception error) { deleteTree(staging); throw invalid("O pacote v12 está corrompido ou contém seções inválidas."); }
+	}
+
 	private DecodedBackup decodeJson(byte[] content, boolean packaged, Map<String, Path> archiveEntries, Path staging, String wholeDigest) {
 		if (content == null || content.length == 0) throw invalid("O arquivo está vazio.");
 		if (content.length > (packaged ? MAX_MANIFEST_BYTES : MAX_FILE_BYTES)) throw tooLarge(packaged ? "O manifesto da cópia excede o limite de 90 MiB." : "O arquivo excede o limite de 5 MiB.");
@@ -754,6 +799,7 @@ public class TaskBackupService {
 				.enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
 				.build();
 			JsonNode root;
+			JsonDuplicatePropertyDetector.reject(content, mapper);
 			try (JsonParser parser = strictFactory.createParser(content)) {
 				root = mapper.readTree(parser);
 			}
@@ -763,7 +809,7 @@ public class TaskBackupService {
 			if (packaged && inputVersion < 5) throw invalid("O pacote ZIP precisa usar a versão 5 ou posterior.");
 			Set<String> expectedRootFields = inputVersion == 1 ? ROOT_FIELDS_V1 : inputVersion <= 3 ? ROOT_FIELDS_V2_V3
 						: inputVersion == 4 ? ROOT_FIELDS_V4 : inputVersion == 8 ? ROOT_FIELDS_V8 : inputVersion == 9 ? ROOT_FIELDS_V9
-						: inputVersion == 10 ? ROOT_FIELDS_V10 : inputVersion == 11 ? ROOT_FIELDS_V11
+						: inputVersion == 10 ? ROOT_FIELDS_V10 : inputVersion == 11 ? ROOT_FIELDS_V11 : inputVersion == 12 ? ROOT_FIELDS_V12
 				: inputVersion >= 7 ? ROOT_FIELDS_V7 : ROOT_FIELDS_V5;
 			if (!fieldNames(root).equals(expectedRootFields)) throw invalid("O arquivo não tem a estrutura esperada da cópia do Hub.");
 			if (!root.get("generatedAt").isTextual()) throw invalid("A versão ou a data da cópia está inválida.");
@@ -881,6 +927,12 @@ public class TaskBackupService {
 						throw invalid("A lista de áreas omitidas contém um valor inválido ou repetido.");
 				}
 			}
+			if (inputVersion >= 12) {
+				JsonNode preferences = root.get("preferences");
+				if (preferences == null || !preferences.isObject()) throw invalid("O documento de preferências pessoais está inválido.");
+				try { userPreferences.validatePortableCopy(mapper.treeToValue(preferences, new tools.jackson.core.type.TypeReference<Map<String, Object>>() {})); }
+				catch (Exception error) { throw invalid("O documento de preferências pessoais é inválido."); }
+			}
 			BackupFile file = mapper.treeToValue(root, BackupFile.class);
 			if (inputVersion < 4) file = new BackupFile(file.formatVersion(), file.generatedAt(), file.tasks(), file.series(), List.of(), List.of(), List.of());
 			validateFile(file);
@@ -888,7 +940,7 @@ public class TaskBackupService {
 				inputVersion >= 7 ? file.authors() : List.of(), inputVersion >= 8 ? normalizeHabits(file.habits()) : List.of(),
 				inputVersion >= 9 ? normalizeFocusSessions(file.focusSessions(), file.generatedAt()) : List.of(),
 				inputVersion >= 10 ? normalizeNotes(file.notes()) : List.of(),
-				inputVersion >= 11 ? file.omittedSections() : List.of());
+				inputVersion >= 11 ? file.omittedSections() : List.of(), inputVersion >= 12 ? file.preferences() : null);
 			Map<String, BackupTask> unique = new LinkedHashMap<>();
 			Set<String> internalConflicts = new LinkedHashSet<>();
 			int repeatedIdenticalIds = 0;
@@ -1475,6 +1527,8 @@ public class TaskBackupService {
 		Set<String> internalNoteConflicts, int repeatedIdenticalNoteIds, Map<String, Path> coverAssets, Path staging) {
 		private void cleanup() { deleteTree(staging); }
 	}
+
+	private record CopySnapshot(BackupFile file, Path staging, Map<String, Path> stagedAssets) {}
 
 	public record PortableCopy(byte[] bytes, Path archivePath, long size, boolean zipped) {
 		private static PortableCopy json(byte[] bytes) { return new PortableCopy(bytes, null, bytes.length, false); }

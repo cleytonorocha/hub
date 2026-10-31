@@ -18,6 +18,7 @@ const permissionOptions = [
   ['HABITS_READ', 'Ver hábitos'], ['HABITS_WRITE', 'Registrar e editar hábitos'],
   ['SETTINGS_READ', 'Ver configurações'], ['SETTINGS_WRITE', 'Alterar configurações'], ['VIDEO_DOWNLOAD', 'Baixar vídeos'],
   ['FOCUS_READ', 'Ver sessões de foco'], ['FOCUS_WRITE', 'Controlar sessões de foco'],
+  ['PORTABLE_COPY', 'Exportar e importar cópia completa dos próprios dados'],
   ['USER_MANAGE', 'Gerenciar usuários'], ['PROFILE_MANAGE', 'Gerenciar perfis'],
 ]
 const canEditProfiles = computed(() => hasPermission('PROFILE_MANAGE'))

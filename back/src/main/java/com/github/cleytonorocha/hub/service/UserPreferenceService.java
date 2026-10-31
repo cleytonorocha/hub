@@ -27,6 +27,12 @@ public class UserPreferenceService {
 	@Transactional(readOnly = true)
 	public PreferenceSnapshot get(String ownerId) { return read(ownerId); }
 
+	@Transactional
+	public PreferenceSnapshot lockAndGet(String ownerId) {
+		jdbc.queryForObject("SELECT id FROM hub_user WHERE id = ? FOR UPDATE", String.class, ownerId);
+		return read(ownerId);
+	}
+
 	/** Initialize only once while holding the owning user row. Existing data always wins. */
 	@Transactional
 	public PreferenceSnapshot initialize(String ownerId, Map<String, Object> legacyDocument) {
@@ -43,10 +49,32 @@ public class UserPreferenceService {
 	public SaveResult save(String ownerId, long expectedRevision, Map<String, Object> input) {
 		Map<String, Object> normalized = validateComplete(input);
 		String json = serialize(normalized);
+		jdbc.queryForObject("SELECT id FROM hub_user WHERE id = ? FOR UPDATE", String.class, ownerId);
 		int updated = jdbc.update("UPDATE hub_user_preference SET preferences = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP WHERE owner_id = ? AND revision = ?",
 			json, ownerId, expectedRevision);
 		if (updated == 1) return new SaveResult(new PreferenceSnapshot(normalized, expectedRevision + 1, true), true);
 		return new SaveResult(read(ownerId), false);
+	}
+
+	public Map<String, Object> validatePortableCopy(Map<String, Object> input) { return validateComplete(input); }
+
+	/** Apply imported personal settings only after confirmation and only at the reviewed revision. */
+	@Transactional
+	public SaveResult replaceFromPortableCopy(String ownerId, long expectedRevision, Map<String, Object> input) {
+		Map<String, Object> normalized = validateComplete(input);
+		String json = serialize(normalized);
+		jdbc.queryForObject("SELECT id FROM hub_user WHERE id = ? FOR UPDATE", String.class, ownerId);
+		PreferenceSnapshot current = read(ownerId);
+		if (current.revision() != expectedRevision) return new SaveResult(current, false);
+		if (current.preferences().equals(normalized) && current.initialized()) return new SaveResult(current, true);
+		if (!current.initialized()) {
+			jdbc.update("INSERT INTO hub_user_preference (owner_id, preferences, revision, updated_at) VALUES (?, ?, 0, CURRENT_TIMESTAMP)", ownerId, serialize(current.preferences()));
+			current = read(ownerId);
+		}
+		int updated = jdbc.update("UPDATE hub_user_preference SET preferences = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP WHERE owner_id = ? AND revision = ?",
+			json, ownerId, current.revision());
+		if (updated != 1) return new SaveResult(read(ownerId), false);
+		return new SaveResult(new PreferenceSnapshot(normalized, current.revision() + 1, true), true);
 	}
 
 	private PreferenceSnapshot read(String ownerId) {

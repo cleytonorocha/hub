@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
+import java.util.Map;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.github.cleytonorocha.hub.entity.Task;
@@ -15,7 +16,13 @@ public final class TaskBackupDtos {
 		List<BackupReadingItem> readingItems, List<BackupAuthor> authors, List<BackupHabit> habits,
 		@JsonInclude(JsonInclude.Include.ALWAYS) List<BackupFocusSession> focusSessions,
 		@JsonInclude(JsonInclude.Include.NON_NULL) List<BackupNote> notes,
-		@JsonInclude(JsonInclude.Include.ALWAYS) List<String> omittedSections) {
+		@JsonInclude(JsonInclude.Include.ALWAYS) List<String> omittedSections,
+		@JsonInclude(JsonInclude.Include.NON_NULL) Map<String, Object> preferences) {
+		public BackupFile(int formatVersion, Instant generatedAt, List<BackupTask> tasks, List<BackupSeries> series,
+				List<BackupReadingItem> readingItems, List<BackupAuthor> authors, List<BackupHabit> habits,
+				List<BackupFocusSession> focusSessions, List<BackupNote> notes, List<String> omittedSections) {
+			this(formatVersion, generatedAt, tasks, series, readingItems, authors, habits, focusSessions, notes, omittedSections, null);
+		}
 		public BackupFile(int formatVersion, Instant generatedAt, List<BackupTask> tasks) { this(formatVersion, generatedAt, tasks, List.of(), null, null, null, null, null, List.of()); }
 		public BackupFile(int formatVersion, Instant generatedAt, List<BackupTask> tasks, List<BackupSeries> series) { this(formatVersion, generatedAt, tasks, series, null, null, null, null, null, List.of()); }
 		public BackupFile(int formatVersion, Instant generatedAt, List<BackupTask> tasks, List<BackupSeries> series, List<BackupReadingItem> readingItems) { this(formatVersion, generatedAt, tasks, series, readingItems, null, null, null, null, List.of()); }
@@ -91,7 +98,23 @@ public final class TaskBackupDtos {
 		int totalHabits, int newHabits, int identicalHabits, int conflictingHabits, int repeatedIdenticalHabitIds,
 		int totalFocusSessions, int newFocusSessions, int identicalFocusSessions, int conflictingFocusSessions, boolean focusSlotConflict,
 		@JsonInclude(JsonInclude.Include.NON_NULL) NoteSummary notes,
-		@JsonInclude(JsonInclude.Include.NON_EMPTY) List<String> omittedSections) {
+		@JsonInclude(JsonInclude.Include.NON_EMPTY) List<String> omittedSections,
+		@JsonInclude(JsonInclude.Include.NON_EMPTY) Map<String, Object> preferencesToReplace) {
+		public Preview(String token, int formatVersion, Instant generatedAt, int totalTasks, int newTasks, int identicalTasks,
+				int conflictingTasks, int repeatedIdenticalIds, List<TaskSample> samples, List<TaskSample> conflicts, List<String> conflictIds,
+				int totalReadingItems, int newReadingItems, int identicalReadingItems, int conflictingReadingItems, int repeatedIdenticalReadingIds,
+				List<ReadingItemSample> readingSamples, List<ReadingItemSample> readingConflicts, List<String> readingConflictIds,
+				boolean canImport, int totalCovers, int newCovers, int identicalCovers, int totalAuthors, int newAuthors, int conflictingAuthors,
+				int totalHabits, int newHabits, int identicalHabits, int conflictingHabits, int repeatedIdenticalHabitIds,
+				int totalFocusSessions, int newFocusSessions, int identicalFocusSessions, int conflictingFocusSessions,
+				boolean focusSlotConflict, NoteSummary notes, List<String> omittedSections) {
+			this(token, formatVersion, generatedAt, totalTasks, newTasks, identicalTasks, conflictingTasks, repeatedIdenticalIds,
+				samples, conflicts, conflictIds, totalReadingItems, newReadingItems, identicalReadingItems, conflictingReadingItems,
+				repeatedIdenticalReadingIds, readingSamples, readingConflicts, readingConflictIds, canImport, totalCovers, newCovers,
+				identicalCovers, totalAuthors, newAuthors, conflictingAuthors, totalHabits, newHabits, identicalHabits, conflictingHabits,
+				repeatedIdenticalHabitIds, totalFocusSessions, newFocusSessions, identicalFocusSessions, conflictingFocusSessions,
+				focusSlotConflict, notes, omittedSections, Map.of());
+		}
 		public Preview(String token, int formatVersion, Instant generatedAt, int totalTasks,
 			int newTasks, int identicalTasks, int conflictingTasks, int repeatedIdenticalIds,
 			List<TaskSample> samples, List<TaskSample> conflicts, List<String> conflictIds,
@@ -138,7 +161,15 @@ public final class TaskBackupDtos {
 	public record Confirmation(String status, Preview preview, int addedTasks, int identicalTasks,
 		int repeatedIdenticalIds, int addedReadingItems, int identicalReadingItems, int repeatedIdenticalReadingIds, int addedCovers, int addedAuthors,
 		int addedHabits, int identicalHabits, int repeatedIdenticalHabitIds, int addedFocusSessions, int identicalFocusSessions,
-		int addedNotes, int identicalNotes, int repeatedIdenticalNoteIds) {
+		int addedNotes, int identicalNotes, int repeatedIdenticalNoteIds, List<String> replacedPreferenceKeys) {
+		public Confirmation(String status, Preview preview, int addedTasks, int identicalTasks, int repeatedIdenticalIds,
+				int addedReadingItems, int identicalReadingItems, int repeatedIdenticalReadingIds, int addedCovers, int addedAuthors,
+				int addedHabits, int identicalHabits, int repeatedIdenticalHabitIds, int addedFocusSessions, int identicalFocusSessions,
+				int addedNotes, int identicalNotes, int repeatedIdenticalNoteIds) {
+			this(status, preview, addedTasks, identicalTasks, repeatedIdenticalIds, addedReadingItems, identicalReadingItems,
+				repeatedIdenticalReadingIds, addedCovers, addedAuthors, addedHabits, identicalHabits, repeatedIdenticalHabitIds,
+				addedFocusSessions, identicalFocusSessions, addedNotes, identicalNotes, repeatedIdenticalNoteIds, List.of());
+		}
 		public Confirmation(String status, Preview preview, int addedTasks, int identicalTasks, int repeatedIdenticalIds,
 				int addedReadingItems, int identicalReadingItems, int repeatedIdenticalReadingIds) {
 			this(status, preview, addedTasks, identicalTasks, repeatedIdenticalIds, addedReadingItems, identicalReadingItems, repeatedIdenticalReadingIds, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
