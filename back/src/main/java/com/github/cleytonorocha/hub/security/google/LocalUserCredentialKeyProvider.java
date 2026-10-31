@@ -1,60 +1,66 @@
 package com.github.cleytonorocha.hub.security.google;
 
 import com.sun.jna.platform.win32.Crypt32Util;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.security.SecureRandom;
 
 @Component
 public final class LocalUserCredentialKeyProvider implements CredentialKeyProvider {
-	private static final SecureRandom RANDOM = new SecureRandom();
-	private final Path keyFile = keyPath();
+	private final Path keyFile;
+	private final Path legacyKeyFile = legacyKeyPath();
+
+	public LocalUserCredentialKeyProvider(@Value("${hub.google.oauth.credential-key-file:}") String keyFile) {
+		this.keyFile = keyFile == null || keyFile.isBlank() ? null : Path.of(keyFile).toAbsolutePath().normalize();
+	}
 
 	@Override
-	public synchronized byte[] loadKey() {
+	public byte[] loadKey() {
+		if (keyFile == null) throw new IllegalStateException("Google credential key is not configured.");
 		try {
-			byte[] protectedKey = Files.readAllBytes(keyFile);
-			byte[] key = Crypt32Util.cryptUnprotectData(protectedKey);
+			if (Files.isSymbolicLink(keyFile) || !Files.isRegularFile(keyFile, LinkOption.NOFOLLOW_LINKS) || Files.size(keyFile) != 32) {
+				throw new IllegalStateException("Google credential key file must contain exactly 32 bytes.");
+			}
+			byte[] key = Files.readAllBytes(keyFile);
 			if (key.length != 32) throw new IllegalStateException("Stored Google credential key has invalid length.");
 			return key;
 		} catch (IOException exception) {
-			throw new IllegalStateException("Google credential key is unavailable; reconnect the Google account.", exception);
+			throw new IllegalStateException("Google credential key is unavailable.", exception);
 		}
 	}
 
 	@Override
-	public synchronized byte[] createKey() {
+	public byte[] loadLegacyKey() {
 		if (!System.getProperty("os.name", "").toLowerCase().contains("windows")) {
-			throw new IllegalStateException("Google Tasks connection requires Windows DPAPI CurrentUser.");
+			throw new IllegalStateException("The legacy Google credential key is only available to the original Windows user.");
 		}
-		byte[] key = new byte[32];
-		RANDOM.nextBytes(key);
-		byte[] protectedKey = Crypt32Util.cryptProtectData(key);
 		try {
-			Files.createDirectories(keyFile.getParent());
-			Path temporaryFile = Files.createTempFile(keyFile.getParent(), "google-tasks-key-", ".tmp");
-			try {
-				Files.write(temporaryFile, protectedKey);
-				Files.move(temporaryFile, keyFile, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-			} catch (AtomicMoveNotSupportedException exception) {
-				Files.deleteIfExists(temporaryFile);
-				throw new IllegalStateException("Atomic credential-key storage is unavailable.", exception);
-			} catch (IOException exception) {
-				Files.deleteIfExists(temporaryFile);
-				throw exception;
+			if (Files.isSymbolicLink(legacyKeyFile) || !Files.isRegularFile(legacyKeyFile, LinkOption.NOFOLLOW_LINKS)) {
+				throw new IllegalStateException("The legacy Google credential key is unavailable.");
 			}
+			byte[] key = Crypt32Util.cryptUnprotectData(Files.readAllBytes(legacyKeyFile));
+			if (key.length != 32) throw new IllegalStateException("The legacy Google credential key has an invalid length.");
 			return key;
 		} catch (IOException exception) {
-			throw new IllegalStateException("Could not store the user-protected Google credential key.", exception);
+			throw new IllegalStateException("The legacy Google credential key is unavailable.", exception);
 		}
 	}
 
-	private Path keyPath() {
+	@Override public boolean isConfigured() {
+		try { loadKey(); return true; }
+		catch (RuntimeException error) { return false; }
+	}
+
+	@Override public boolean isLegacyKeyAvailable() {
+		try { loadLegacyKey(); return true; }
+		catch (RuntimeException error) { return false; }
+	}
+
+	private static Path legacyKeyPath() {
 		String localAppData = System.getenv("LOCALAPPDATA");
 		Path root = localAppData == null || localAppData.isBlank()
 			? Path.of(System.getProperty("user.home"), "AppData", "Local")

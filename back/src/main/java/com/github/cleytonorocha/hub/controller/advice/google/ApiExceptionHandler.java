@@ -6,6 +6,7 @@ import com.github.cleytonorocha.hub.service.google.GoogleOAuthService.GoogleOAut
 import com.github.cleytonorocha.hub.service.google.GoogleOAuthService.OAuthConfigurationException;
 import com.github.cleytonorocha.hub.service.google.GoogleTasksService.GoogleSyncException;
 import com.github.cleytonorocha.hub.service.google.GoogleTasksService.TaskConflictException;
+import com.github.cleytonorocha.hub.security.AuthContext;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -52,7 +53,7 @@ public final class ApiExceptionHandler {
 
 	@ExceptionHandler(RestClientResponseException.class)
 	public ResponseEntity<Map<String, String>> googleError(RestClientResponseException exception) {
-		if (exception.getStatusCode().value() == 401 || exception.getStatusCode().value() == 403) oauth.markReauthorizationRequired();
+		if (exception.getStatusCode().value() == 401 || exception.getStatusCode().value() == 403) oauth.markReauthorizationRequired(AuthContext.userId());
 		return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("message", "Google Tasks não respondeu à solicitação. Atualize a conexão e tente novamente."));
 	}
 

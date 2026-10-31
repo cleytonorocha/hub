@@ -180,16 +180,17 @@ public class ReadingItemService {
 		collectionRevision.lock();
 		ReadingItem item = find(id);
 		checkRevision(item, expectedRevision);
-		ReadingCoverStorageService.StoredCover stored = covers.store(file);
+		String ownerId = AuthContext.userId();
+		ReadingCoverStorageService.StoredCover stored = covers.store(ownerId, file);
 		String previous = item.getCoverImageName();
 		try {
 			item.updateCoverImage(stored.name(), stored.sha256(), null, Instant.now());
 			ReadingItem saved = items.saveAndFlush(item);
 			collectionRevision.increment();
-			cleanupOnCompletion(stored.name(), previous);
+			cleanupOnCompletion(ownerId, stored.name(), previous);
 			return ItemView.from(saved);
 		} catch (RuntimeException error) {
-			covers.delete(stored.name());
+			covers.delete(ownerId, stored.name());
 			throw error;
 		}
 	}
@@ -201,16 +202,17 @@ public class ReadingItemService {
 		checkRevision(item, expectedRevision);
 		if (!"BOOK".equals(item.getType())) throw badRequest("A importação de capa por link está disponível somente para livros.");
 		if (sourceUrl == null || sourceUrl.isBlank() || sourceUrl.strip().length() > 2048) throw badRequest("Informe um link de imagem válido.");
-		ReadingCoverStorageService.StoredCover stored = covers.store(googleCovers.fetch(sourceUrl.strip()));
+		String ownerId = AuthContext.userId();
+		ReadingCoverStorageService.StoredCover stored = covers.store(ownerId, googleCovers.fetch(sourceUrl.strip()));
 		String previous = item.getCoverImageName();
 		try {
 			item.updateCoverImage(stored.name(), stored.sha256(), sourceUrl.strip(), Instant.now());
 			ReadingItem saved = items.saveAndFlush(item);
 			collectionRevision.increment();
-			cleanupOnCompletion(stored.name(), previous);
+			cleanupOnCompletion(ownerId, stored.name(), previous);
 			return ItemView.from(saved);
 		} catch (RuntimeException error) {
-			covers.delete(stored.name());
+			covers.delete(ownerId, stored.name());
 			throw error;
 		}
 	}
@@ -221,11 +223,12 @@ public class ReadingItemService {
 		ReadingItem item = find(id);
 		checkRevision(item, expectedRevision);
 		String previous = item.getCoverImageName();
+		String ownerId = AuthContext.userId();
 		if (previous == null) return ItemView.from(item);
 		item.updateCoverImage(null, null, null, Instant.now());
 		ReadingItem saved = items.saveAndFlush(item);
 		collectionRevision.increment();
-		cleanupOnCompletion(null, previous);
+		cleanupOnCompletion(ownerId, null, previous);
 		return ItemView.from(saved);
 	}
 
@@ -234,7 +237,7 @@ public class ReadingItemService {
 		ReadingItem item = find(id);
 		if (item.getCoverImageName() == null || item.getCoverImageSha256() == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Este conteúdo não possui imagem de capa.");
 		try {
-			byte[] bytes = covers.read(item.getCoverImageName(), thumbnail);
+			byte[] bytes = covers.read(AuthContext.userId(), item.getCoverImageName(), thumbnail);
 			if (!thumbnail && !java.security.MessageDigest.isEqual(
 				item.getCoverImageSha256().getBytes(java.nio.charset.StandardCharsets.US_ASCII),
 				sha256(bytes).getBytes(java.nio.charset.StandardCharsets.US_ASCII))) {
@@ -252,12 +255,12 @@ public class ReadingItemService {
 		}
 	}
 
-	private void cleanupOnCompletion(String added, String previous) {
+	private void cleanupOnCompletion(String ownerId, String added, String previous) {
 		TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
 			@Override public void afterCompletion(int status) {
 				if (status == STATUS_COMMITTED) {
-					if (previous != null && !previous.equals(added)) covers.delete(previous);
-				} else if (added != null) covers.delete(added);
+					if (previous != null && !previous.equals(added)) covers.delete(ownerId, previous);
+				} else if (added != null) covers.delete(ownerId, added);
 			}
 		});
 	}

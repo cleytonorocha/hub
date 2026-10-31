@@ -3,6 +3,7 @@ name: hub
 services:
   backend:
     image: hub-backend:local
+    init: true
     build:
       context: ./back
       dockerfile: Dockerfile
@@ -10,7 +11,7 @@ services:
     environment:
       SERVER_PORT: "8080"
       SERVER_ADDRESS: "0.0.0.0"
-      SPRING_DATASOURCE_URL: "jdbc:h2:file:/data/hub;DB_CLOSE_ON_EXIT=FALSE"
+      SPRING_DATASOURCE_URL: "jdbc:h2:file:/data/database/hub;DB_CLOSE_ON_EXIT=FALSE"
       SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.h2.Driver
       SPRING_DATASOURCE_USERNAME: sa
       SPRING_DATASOURCE_PASSWORD: ""
@@ -19,12 +20,12 @@ services:
       SPRING_H2_CONSOLE_ENABLED: "false"
       SPRING_SQL_INIT_MODE: always
       HUB_GOOGLE_OAUTH_CLIENT_ID: ${HUB_GOOGLE_OAUTH_CLIENT_ID:-}
-      HUB_MEDIA_ROOT: /var/lib/hub/media
+      HUB_DATA_ROOT: /data
+      HUB_VIDEO_DOWNLOAD_TEMP_ROOT: /var/tmp/hub/video-downloads
     ports:
       - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
     volumes:
-      - hub_data:/data
-      - hub_media:/var/lib/hub/media
+      - hub_storage:/data
     healthcheck:
       test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:8080/api/auth/setup-state >/dev/null || exit 1"]
       interval: 15s
@@ -51,7 +52,5 @@ services:
       start_period: 10s
 
 volumes:
-  hub_data:
-    name: hub_data
-  hub_media:
-    name: hub_media
+  hub_storage:
+    name: hub_storage

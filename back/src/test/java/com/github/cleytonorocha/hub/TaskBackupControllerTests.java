@@ -4,15 +4,20 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import com.github.cleytonorocha.hub.dto.TaskBackupDtos.BackupFile;
 import com.github.cleytonorocha.hub.dto.TaskBackupDtos.BackupTask;
 import com.github.cleytonorocha.hub.dto.TaskBackupDtos.BackupReadingItem;
+import com.github.cleytonorocha.hub.dto.TaskBackupDtos.BackupHabit;
+import com.github.cleytonorocha.hub.dto.TaskBackupDtos.BackupHabitSchedule;
+import com.github.cleytonorocha.hub.dto.TaskBackupDtos.BackupFocusSession;
+import com.github.cleytonorocha.hub.dto.TaskBackupDtos.BackupNote;
 import com.github.cleytonorocha.hub.entity.Task;
+import com.github.cleytonorocha.hub.controller.TaskBackupController;
 import com.github.cleytonorocha.hub.repository.TaskRepository;
 import com.github.cleytonorocha.hub.repository.ReadingItemRepository;
 import java.time.Instant;
@@ -22,6 +27,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.zip.ZipInputStream;
+import java.util.zip.ZipOutputStream;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -34,18 +43,19 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.web.server.ResponseStatusException;
 
 /** End-to-end coverage for the versioned local-task portable-copy API. */
 @SpringBootTest
 @AutoConfigureMockMvc
-class TaskBackupControllerTests {
+class TaskBackupControllerTests extends AuthenticatedHubMvcTestSupport {
 	private static final String BASE = "/api/tasks/portable-copy";
 	private static final String FUTURE_VERSION = "{\"formatVersion\":99,\"generatedAt\":\"2026-10-28T00:00:00Z\",\"tasks\":[]}";
 
-	@Autowired MockMvc mvc;
 	@Autowired TaskRepository tasks;
+	@Autowired TaskBackupController backupController;
 	@Autowired ReadingItemRepository readingItems;
 	@Autowired JdbcTemplate jdbc;
 	@Autowired ObjectMapper mapper;
@@ -53,8 +63,19 @@ class TaskBackupControllerTests {
 	@BeforeEach
 	void clearTasksAndResetRevision() {
 		jdbc.execute("ALTER TABLE hub_task DROP CONSTRAINT IF EXISTS chk_backup_failure");
+		jdbc.execute("ALTER TABLE hub_note DROP CONSTRAINT IF EXISTS chk_backup_note_failure");
 		tasks.deleteAll();
 		readingItems.deleteAll();
+		jdbc.update("DELETE FROM hub_note_tag WHERE owner_id=?", TEST_OWNER);
+		jdbc.update("DELETE FROM hub_note WHERE owner_id=?", TEST_OWNER);
+		jdbc.update("UPDATE hub_note_user_revision SET revision=0 WHERE owner_id=?", TEST_OWNER);
+		jdbc.update("UPDATE hub_focus_active_slot SET session_id=NULL WHERE owner_id=?", TEST_OWNER);
+		jdbc.update("DELETE FROM hub_focus_session WHERE owner_id=?", TEST_OWNER);
+		jdbc.update("DELETE FROM hub_habit_checkin WHERE owner_id=?", TEST_OWNER);
+		jdbc.update("DELETE FROM hub_habit_pause WHERE owner_id=?", TEST_OWNER);
+		jdbc.update("DELETE FROM hub_habit_schedule WHERE owner_id=?", TEST_OWNER);
+		jdbc.update("DELETE FROM hub_habit WHERE owner_id=?", TEST_OWNER);
+		jdbc.update("UPDATE hub_habit_user_revision SET revision=0 WHERE owner_id=?", TEST_OWNER);
 		jdbc.update("UPDATE hub_task_collection_state SET revision = 0 WHERE state_id = 1");
 		jdbc.update("UPDATE hub_reading_collection_state SET revision = 0 WHERE state_id = 1");
 	}
@@ -68,24 +89,33 @@ class TaskBackupControllerTests {
 		tasks.save(new Task("Task Google", LocalDate.of(2026, 11, 1), Task.Type.GOOGLE));
 
 		MvcResult exported = mvc.perform(get(BASE + "/export"))
+			.andExpect(status().isOk()).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.request().asyncStarted()).andReturn();
+		MvcResult completedExport = mvc.performAsyncDispatch(exported)
 			.andExpect(status().isOk())
-			.andExpect(jsonPath("$.formatVersion").value(4))
-			.andExpect(jsonPath("$.tasks.length()").value(1))
-			.andExpect(jsonPath("$.readingItems.length()").value(0))
-			.andExpect(jsonPath("$.tasks[0].id").value(id))
-			.andExpect(jsonPath("$.tasks[0].dueDate").doesNotExist())
-			.andExpect(jsonPath("$.tasks[0].category").value("Pessoal"))
-			.andExpect(jsonPath("$.tasks[0].color").value("#123456"))
-			.andExpect(jsonPath("$.tasks[0].priority").value("HIGH"))
-			.andExpect(jsonPath("$.tasks[0].notes").value("Notas preservadas"))
+			.andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().contentType("application/zip"))
+			.andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("Content-Disposition", org.hamcrest.Matchers.containsString("hub-portable-copy.zip")))
 			.andReturn();
+		Map<String, byte[]> zipEntries = unzip(completedExport.getResponse().getContentAsByteArray());
+		assertThat(zipEntries.keySet()).containsExactly("manifest.json");
+		String content = new String(zipEntries.get("manifest.json"), java.nio.charset.StandardCharsets.UTF_8);
+		JsonNode manifest = mapper.readTree(content);
+		assertThat(manifest.get("formatVersion").asInt()).isEqualTo(11);
+		assertThat(manifest.get("omittedSections").size()).isZero();
+		assertThat(manifest.get("readingItems").size()).isZero();
+		assertThat(manifest.get("tasks").get(0).get("id").asText()).isEqualTo(id);
+		assertThat(manifest.get("tasks").get(0).has("dueDate")).isTrue();
+		assertThat(manifest.get("tasks").get(0).get("dueDate").isNull()).isTrue();
+		assertThat(manifest.get("tasks").get(0).get("category").asText()).isEqualTo("Pessoal");
+		assertThat(manifest.get("tasks").get(0).get("color").asText()).isEqualTo("#123456");
+		assertThat(manifest.get("tasks").get(0).get("priority").asText()).isEqualTo("HIGH");
+		assertThat(manifest.get("tasks").get(0).get("notes").asText()).isEqualTo("Notas preservadas");
 
 		tasks.deleteAll();
-		String content = exported.getResponse().getContentAsString();
-		MvcResult preview = preview(content);
+		byte[] packageBytes = completedExport.getResponse().getContentAsByteArray();
+		MvcResult preview = previewPackage(packageBytes);
 		assertThat(tasks.count()).isZero();
 		String token = json(preview).get("token").asText();
-		mvc.perform(importRequest(content, token))
+		mvc.perform(importPackageRequest(packageBytes, token))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.status").value("IMPORTED"))
 			.andExpect(jsonPath("$.addedTasks").value(1));
@@ -98,6 +128,37 @@ class TaskBackupControllerTests {
 	}
 
 	@Test
+	void partialReadPermissionsExportOnlyAccessibleModulesAndListOmissions() throws Exception {
+		String noteId = UUID.randomUUID().toString();
+		String habitId = UUID.randomUUID().toString();
+		String focusId = UUID.randomUUID().toString();
+		jdbc.update("INSERT INTO hub_note(id,owner_id,title,body,pinned,archived,related_task_id,related_task_unavailable,revision,created_at,updated_at) VALUES(?,?,?,'conteúdo',FALSE,FALSE,NULL,FALSE,0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)",
+			noteId, TEST_OWNER, "Nota permitida");
+		jdbc.update("INSERT INTO hub_habit(id,owner_id,name,start_date,revision,created_at,updated_at) VALUES(?,?,?,CURRENT_DATE,0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)",
+			habitId, TEST_OWNER, "Hábito preservado");
+		jdbc.update("INSERT INTO hub_focus_session(id,owner_id,objective,planned_seconds,focused_seconds,session_state,started_at,ended_at,end_reason) VALUES(?,?,?,3600,300,'ENDED',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,'NORMAL')",
+			focusId, TEST_OWNER, "Sessão preservada");
+		HubAuthenticatedMvc partial = mvcWithPermissions("TASK_READ,READING_READ,NOTES_READ");
+		MvcResult started = partial.perform(get(BASE + "/export"))
+			.andExpect(status().isOk()).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.request().asyncStarted()).andReturn();
+		MvcResult completed = partial.performAsyncDispatch(started).andExpect(status().isOk()).andReturn();
+		Map<String, byte[]> entries = unzip(completed.getResponse().getContentAsByteArray());
+		JsonNode manifest = mapper.readTree(entries.get("manifest.json"));
+		assertThat(manifest.get("formatVersion").asInt()).isEqualTo(11);
+		assertThat(manifest.get("omittedSections").size()).isEqualTo(2);
+		assertThat(manifest.get("omittedSections").get(0).asText()).isEqualTo("habits");
+		assertThat(manifest.get("omittedSections").get(1).asText()).isEqualTo("focusSessions");
+		assertThat(manifest.get("habits").size()).isZero();
+		assertThat(manifest.get("focusSessions").size()).isZero();
+		assertThat(manifest.get("notes").get(0).get("id").asText()).isEqualTo(noteId);
+		MvcResult preview = previewPackage(completed.getResponse().getContentAsByteArray());
+		mvc.perform(importPackageRequest(completed.getResponse().getContentAsByteArray(), json(preview).get("token").asText()))
+			.andExpect(status().isOk());
+		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM hub_habit WHERE owner_id=? AND id=?", Integer.class, TEST_OWNER, habitId)).isEqualTo(1);
+		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM hub_focus_session WHERE owner_id=? AND id=?", Integer.class, TEST_OWNER, focusId)).isEqualTo(1);
+	}
+
+	@Test
 	void importsVersionOneFilesWithoutSeriesOrChecklistFields() throws Exception {
 		String id = UUID.randomUUID().toString();
 		String legacy = "{\"formatVersion\":1,\"generatedAt\":\"2026-10-28T00:00:00Z\",\"tasks\":[{\"id\":\"" + id
@@ -105,6 +166,96 @@ class TaskBackupControllerTests {
 		String token = json(preview(legacy)).get("token").asText();
 		mvc.perform(importRequest(legacy, token)).andExpect(status().isOk()).andExpect(jsonPath("$.addedTasks").value(1));
 		assertThat(tasks.findById(id)).isPresent();
+	}
+
+	@Test
+	void acceptsAnExactVersionFourReadingFixture() throws Exception {
+		String id = UUID.randomUUID().toString();
+		String legacy = "{\"formatVersion\":4,\"generatedAt\":\"2026-10-28T10:00:00Z\",\"tasks\":[],\"series\":[],\"readingItems\":[{"
+			+ "\"id\":\"" + id + "\",\"title\":\"Livro antigo\",\"type\":\"BOOK\",\"authorOrSource\":\"Autora\",\"url\":null,"
+			+ "\"status\":\"IN_PROGRESS\",\"progressMarker\":\"Capítulo 2\",\"note\":\"Nota\",\"tags\":[\"Arquivo\"],"
+			+ "\"archived\":false,\"createdAt\":\"2026-10-28T09:00:00Z\",\"updatedAt\":\"2026-10-28T10:00:00Z\"}]}";
+		MvcResult preview = preview(legacy);
+		assertThat(json(preview).get("newReadingItems").asInt()).isEqualTo(1);
+		mvc.perform(importRequest(legacy, json(preview).get("token").asText()))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.addedReadingItems").value(1));
+		assertThat(readingItems.findById(id)).isPresent();
+	}
+
+	@Test
+	void acceptsVersionSevenAsZipAndRejectsItAsStandaloneJson() throws Exception {
+		String versionSeven = mapper.writeValueAsString(Map.of("formatVersion", 7, "generatedAt", Instant.parse("2026-10-28T10:00:00Z"),
+			"tasks", List.of(), "series", List.of(), "readingItems", List.of(), "authors", List.of()));
+		mvc.perform(post(BASE + "/preview").contentType(MediaType.APPLICATION_JSON).content(versionSeven))
+			.andExpect(status().isBadRequest());
+		MvcResult preview = previewPackage(packageManifest(versionSeven));
+		assertThat(json(preview).get("formatVersion").asInt()).isEqualTo(7);
+		assertThat(json(preview).get("totalTasks").asInt()).isZero();
+	}
+
+	@Test
+	void acceptsAndImportsVersionEightHabitFixtureFromZip() throws Exception {
+		String habitId = UUID.randomUUID().toString();
+		BackupHabit habit = new BackupHabit(habitId, "Hábito V8", LocalDate.of(2026, 10, 28),
+			Instant.parse("2026-10-28T09:00:00Z"), Instant.parse("2026-10-28T10:00:00Z"),
+			List.of(new BackupHabitSchedule(LocalDate.of(2026, 10, 28), 31)), List.of(), List.of());
+		String versionEight = mapper.writeValueAsString(Map.of("formatVersion", 8,
+			"generatedAt", Instant.parse("2026-10-28T10:00:00Z"), "tasks", List.of(), "series", List.of(),
+			"readingItems", List.of(), "authors", List.of(), "habits", List.of(habit)));
+		byte[] fixture = packageManifest(versionEight);
+		MvcResult preview = previewPackage(fixture);
+		assertThat(json(preview).get("formatVersion").asInt()).isEqualTo(8);
+		assertThat(json(preview).get("newHabits").asInt()).isEqualTo(1);
+		mvc.perform(importPackageRequest(fixture, json(preview).get("token").asText()))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.addedHabits").value(1));
+		assertThat(jdbc.queryForObject("SELECT name FROM hub_habit WHERE owner_id=? AND id=?", String.class, TEST_OWNER, habitId)).isEqualTo("Hábito V8");
+	}
+
+	@Test
+	void versionsEightThroughElevenOmittedAreasNeverDeleteExistingFocusData() throws Exception {
+		String habitId = UUID.randomUUID().toString();
+		String focusId = UUID.randomUUID().toString();
+		String noteId = UUID.randomUUID().toString();
+		jdbc.update("INSERT INTO hub_habit(id,owner_id,name,start_date,revision,created_at,updated_at) VALUES(?,?,?,CURRENT_DATE,0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)",
+			habitId, TEST_OWNER, "Preservar hábito");
+		jdbc.update("INSERT INTO hub_focus_session(id,owner_id,objective,planned_seconds,focused_seconds,session_state,started_at,ended_at,end_reason) VALUES(?,?,?,3600,300,'ENDED',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,'NORMAL')",
+			focusId, TEST_OWNER, "Preservar sessão");
+		jdbc.update("INSERT INTO hub_note(id,owner_id,title,body,pinned,archived,related_task_id,related_task_unavailable,revision,created_at,updated_at) VALUES(?,?,?,'corpo',FALSE,FALSE,NULL,FALSE,0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)",
+			noteId, TEST_OWNER, "Preservar nota");
+		for (int version = 8; version <= 11; version++) {
+			byte[] fixture = packageManifest(partialVersionFile(version));
+			MvcResult preview = previewPackage(fixture);
+			assertThat(json(preview).get("formatVersion").asInt()).isEqualTo(version);
+			mvc.perform(importPackageRequest(fixture, json(preview).get("token").asText())).andExpect(status().isOk());
+			assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM hub_habit WHERE owner_id=? AND id=?", Integer.class, TEST_OWNER, habitId)).isEqualTo(1);
+			assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM hub_focus_session WHERE owner_id=? AND id=?", Integer.class, TEST_OWNER, focusId)).isEqualTo(1);
+			assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM hub_note WHERE owner_id=? AND id=?", Integer.class, TEST_OWNER, noteId)).isEqualTo(1);
+		}
+	}
+
+	@Test
+	void reimportingActiveSessionSnapshotIsAnIdenticalNoOp() throws Exception {
+		String id = UUID.randomUUID().toString();
+		jdbc.update("INSERT INTO hub_focus_session(id,owner_id,objective,planned_seconds,focused_seconds,session_state,started_at,resumed_at) VALUES(?,?,?,3600,0,'ACTIVE',DATEADD('SECOND',-90,CURRENT_TIMESTAMP),DATEADD('SECOND',-30,CURRENT_TIMESTAMP))",
+			id, TEST_OWNER, "Sessão ativa preservada");
+		jdbc.update("UPDATE hub_focus_active_slot SET session_id=? WHERE owner_id=?", id, TEST_OWNER);
+		byte[] snapshot = packageManifest(exportManifest());
+		MvcResult preview = previewPackage(snapshot);
+		assertThat(json(preview).get("newFocusSessions").asInt()).isZero();
+		assertThat(json(preview).get("identicalFocusSessions").asInt()).isEqualTo(1);
+		mvc.perform(importPackageRequest(snapshot, json(preview).get("token").asText()))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.addedFocusSessions").value(0))
+			.andExpect(jsonPath("$.identicalFocusSessions").value(1));
+		assertThat(jdbc.queryForObject("SELECT session_state FROM hub_focus_session WHERE owner_id=? AND id=?", String.class, TEST_OWNER, id)).isEqualTo("ACTIVE");
+		assertThat(jdbc.queryForObject("SELECT session_id FROM hub_focus_active_slot WHERE owner_id=?", String.class, TEST_OWNER)).isEqualTo(id);
+	}
+
+	@Test
+	void standaloneVersionTenJsonIsRejectedByPreviewRoute() throws Exception {
+		String literalVersionTen = "{\"formatVersion\":10,\"generatedAt\":\"2026-10-28T10:00:00Z\",\"tasks\":[],\"series\":[],"
+			+ "\"readingItems\":[],\"authors\":[],\"habits\":[],\"focusSessions\":[],\"notes\":[]}";
+		mvc.perform(post(BASE + "/preview").contentType(MediaType.APPLICATION_JSON).content(literalVersionTen))
+			.andExpect(status().isBadRequest());
 	}
 
 	@Test
@@ -127,11 +278,11 @@ class TaskBackupControllerTests {
 		String now = "2026-10-28T10:00:00Z";
 		BackupReadingItem item = new BackupReadingItem(id, "Livro físico", "BOOK", "Autora", null, "IN_PROGRESS",
 			"Capítulo 4", "Uma nota", List.of("Trabalho", "Pessoal"), true, Instant.parse(now), Instant.parse(now));
-		String content = mapper.writeValueAsString(new BackupFile(4, Instant.parse(now), List.of(), List.of(), List.of(item)));
-		MvcResult preview = preview(content);
+		byte[] content = packageManifest(currentReadingFile(item, now));
+		MvcResult preview = previewPackage(content);
 		assertThat(json(preview).get("newReadingItems").asInt()).isEqualTo(1);
 		assertThat(readingItems.count()).isZero();
-		mvc.perform(importRequest(content, json(preview).get("token").asText()))
+		mvc.perform(importPackageRequest(content, json(preview).get("token").asText()))
 			.andExpect(status().isOk()).andExpect(jsonPath("$.addedReadingItems").value(1));
 		MvcResult restored = mvc.perform(get("/api/reading-items/{id}", id)).andExpect(status().isOk())
 			.andExpect(jsonPath("$.archived").value(true)).andExpect(jsonPath("$.progressMarker").value("Capítulo 4"))
@@ -146,14 +297,124 @@ class TaskBackupControllerTests {
 		Instant now = Instant.parse("2026-10-28T10:00:00Z");
 		BackupReadingItem incoming = new BackupReadingItem(id, "Conteúdo a importar", "ARTICLE", null, null, "TO_READ",
 			"", "", List.of(), false, now, now);
-		String content = mapper.writeValueAsString(new BackupFile(4, now, List.of(), List.of(), List.of(incoming)));
-		String token = json(preview(content)).get("token").asText();
+		byte[] content = packageManifest(currentReadingFile(incoming, now.toString()));
+		String token = json(previewPackage(content)).get("token").asText();
 		mvc.perform(post("/api/reading-items").contentType(MediaType.APPLICATION_JSON)
 			.content("{\"title\":\"Mudança paralela\",\"type\":\"BOOK\"}"))
 			.andExpect(status().isCreated());
-		mvc.perform(importRequest(content, token)).andExpect(status().isOk())
+		mvc.perform(importPackageRequest(content, token)).andExpect(status().isOk())
 			.andExpect(jsonPath("$.status").value("REVIEW_REQUIRED"));
 		assertThat(readingItems.findById(id)).isEmpty();
+	}
+
+	@Test
+	void versionNineHabitAndFocusDataRoundTripsThroughVersionElevenWithRecomputedNoteLinks() throws Exception {
+		String taskId = UUID.randomUUID().toString();
+		String habitId = UUID.randomUUID().toString();
+		String focusId = UUID.randomUUID().toString();
+		String noteId = UUID.randomUUID().toString();
+		tasks.save(Task.restoreLocal(taskId, "Tarefa vinculada", null, null, false, "Geral", "#A986FF", Task.Priority.NORMAL, ""));
+
+		Instant generatedAt = Instant.parse("2026-10-28T10:30:00Z");
+		BackupHabit habit = new BackupHabit(habitId, "Caminhada", LocalDate.of(2026, 10, 26),
+			Instant.parse("2026-10-28T09:00:00Z"), Instant.parse("2026-10-28T10:00:00Z"),
+			List.of(new BackupHabitSchedule(LocalDate.of(2026, 10, 26), 127)),
+			List.of(new com.github.cleytonorocha.hub.dto.TaskBackupDtos.BackupHabitPause(LocalDate.of(2026, 10, 27), LocalDate.of(2026, 10, 28))),
+			List.of(LocalDate.of(2026, 10, 26), LocalDate.of(2026, 10, 28)));
+		BackupFocusSession focus = new BackupFocusSession(focusId, "Revisar projeto", 1800, 420, "PAUSED",
+			Instant.parse("2026-10-28T09:00:00Z"), null, Instant.parse("2026-10-28T10:00:00Z"), null, null, taskId);
+		String versionNine = mapper.writeValueAsString(Map.of("formatVersion", 9, "generatedAt", generatedAt, "tasks", List.of(),
+			"series", List.of(), "readingItems", List.of(), "authors", List.of(), "habits", List.of(habit), "focusSessions", List.of(focus)));
+		byte[] versionNinePackage = packageManifest(versionNine);
+		MvcResult v9Preview = previewPackage(versionNinePackage);
+		mvc.perform(importPackageRequest(versionNinePackage, json(v9Preview).get("token").asText()))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.addedHabits").value(1)).andExpect(jsonPath("$.addedFocusSessions").value(1));
+
+		BackupNote note = new BackupNote(noteId, "Resumo", "Conteúdo preservado", List.of("Projeto"), true, false,
+			taskId, true, Instant.parse("2026-10-28T09:30:00Z"), generatedAt);
+		String versionTen = currentV10File(List.of(note), generatedAt);
+		byte[] versionTenPackage = packageManifest(versionTen);
+		MvcResult v10Preview = previewPackage(versionTenPackage);
+		assertThat(json(v10Preview).get("notes").get("notesWithUnavailableTaskLinks").asInt()).isZero();
+		mvc.perform(importPackageRequest(versionTenPackage, json(v10Preview).get("token").asText()))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.addedNotes").value(1));
+		mvc.perform(get("/api/notes/{id}", noteId)).andExpect(status().isOk())
+			.andExpect(jsonPath("$.relatedTaskId").value(taskId)).andExpect(jsonPath("$.relatedTaskStatus").value("AVAILABLE"));
+
+		JsonNode manifest = mapper.readTree(exportManifest());
+		assertThat(manifest.get("formatVersion").asInt()).isEqualTo(11);
+		assertThat(manifest.get("tasks").findValues("id").stream().map(JsonNode::asText).toList()).contains(taskId);
+		assertThat(manifest.get("habits").get(0).get("id").asText()).isEqualTo(habitId);
+		assertThat(manifest.get("habits").get(0).get("schedules").size()).isEqualTo(1);
+		assertThat(manifest.get("habits").get(0).get("pauses").get(0).get("resumedOn").asText()).isEqualTo("2026-10-28");
+		assertThat(manifest.get("habits").get(0).get("checkIns").size()).isEqualTo(2);
+		assertThat(manifest.get("focusSessions").get(0).get("state").asText()).isEqualTo("PAUSED");
+		assertThat(manifest.get("focusSessions").get(0).get("taskId").asText()).isEqualTo(taskId);
+		assertThat(manifest.get("notes").get(0).get("relatedTaskId").asText()).isEqualTo(taskId);
+		assertThat(manifest.get("notes").get(0).get("relatedTaskUnavailable").asBoolean()).isFalse();
+
+		jdbc.update("DELETE FROM hub_note_tag WHERE owner_id=?", TEST_OWNER);
+		jdbc.update("DELETE FROM hub_note WHERE owner_id=?", TEST_OWNER);
+		jdbc.update("UPDATE hub_focus_active_slot SET session_id=NULL WHERE owner_id=?", TEST_OWNER);
+		jdbc.update("DELETE FROM hub_focus_session WHERE owner_id=?", TEST_OWNER);
+		jdbc.update("DELETE FROM hub_habit_checkin WHERE owner_id=?", TEST_OWNER);
+		jdbc.update("DELETE FROM hub_habit_pause WHERE owner_id=?", TEST_OWNER);
+		jdbc.update("DELETE FROM hub_habit_schedule WHERE owner_id=?", TEST_OWNER);
+		jdbc.update("DELETE FROM hub_habit WHERE owner_id=?", TEST_OWNER);
+		tasks.deleteAll();
+		tasks.flush();
+		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM hub_task WHERE owner_id=? AND id=?", Integer.class, TEST_OWNER, taskId)).isZero();
+		String exportedManifest = mapper.writeValueAsString(manifest);
+		byte[] exportedPackage = packageManifest(exportedManifest);
+		MvcResult roundTripPreview = previewPackage(exportedPackage);
+		mvc.perform(importPackageRequest(exportedPackage, json(roundTripPreview).get("token").asText()))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.addedTasks").value(1))
+			.andExpect(jsonPath("$.addedHabits").value(1)).andExpect(jsonPath("$.addedFocusSessions").value(1))
+			.andExpect(jsonPath("$.addedNotes").value(1));
+		assertThat(jdbc.queryForObject("SELECT related_task_unavailable FROM hub_note WHERE owner_id=? AND id=?", Boolean.class, TEST_OWNER, noteId)).isFalse();
+		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM hub_habit_schedule WHERE owner_id=? AND habit_id=?", Integer.class, TEST_OWNER, habitId)).isEqualTo(1);
+		assertThat(jdbc.queryForObject("SELECT resumed_on FROM hub_habit_pause WHERE owner_id=? AND habit_id=?", LocalDate.class, TEST_OWNER, habitId)).isEqualTo(LocalDate.of(2026, 10, 28));
+		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM hub_habit_checkin WHERE owner_id=? AND habit_id=?", Integer.class, TEST_OWNER, habitId)).isEqualTo(2);
+		assertThat(jdbc.queryForObject("SELECT task_id FROM hub_focus_session WHERE owner_id=? AND id=?", String.class, TEST_OWNER, focusId)).isEqualTo(taskId);
+		assertThat(jdbc.queryForObject("SELECT session_state FROM hub_focus_session WHERE owner_id=? AND id=?", String.class, TEST_OWNER, focusId)).isEqualTo("PAUSED");
+		assertThat(jdbc.queryForObject("SELECT session_id FROM hub_focus_active_slot WHERE owner_id=?", String.class, TEST_OWNER)).isEqualTo(focusId);
+	}
+
+	@Test
+	void failedCrossDomainConfirmationRollsBackAllRowsAndKeepsPreviewRetryable() throws Exception {
+		Instant generatedAt = Instant.parse("2026-10-28T10:30:00Z");
+		BackupTask incomingTask = task(UUID.randomUUID().toString(), "Tarefa atômica", null, null, false, "Geral", "#A986FF", "NORMAL", "");
+		String habitId = UUID.randomUUID().toString();
+		BackupHabit incomingHabit = new BackupHabit(habitId, "Hábito atômico", LocalDate.of(2026, 10, 26),
+			Instant.parse("2026-10-28T09:00:00Z"), Instant.parse("2026-10-28T10:00:00Z"),
+			List.of(new BackupHabitSchedule(LocalDate.of(2026, 10, 26), 127)), List.of(), List.of());
+		String focusId = UUID.randomUUID().toString();
+		BackupFocusSession incomingFocus = new BackupFocusSession(focusId, "Foco atômico", 1200, 60, "PAUSED",
+			Instant.parse("2026-10-28T09:00:00Z"), null, Instant.parse("2026-10-28T10:00:00Z"), null, null, incomingTask.id());
+		BackupNote incomingNote = new BackupNote(UUID.randomUUID().toString(), "force-note-rollback", "Nota", List.of(), false, false,
+			incomingTask.id(), false, Instant.parse("2026-10-28T09:30:00Z"), generatedAt);
+		byte[] content = packageManifest(currentV10File(List.of(incomingNote), generatedAt,
+			List.of(incomingTask), List.of(incomingHabit), List.of(incomingFocus)));
+		String token = json(previewPackage(content)).get("token").asText();
+		long beforeTaskRevision = revision();
+		long beforeNoteRevision = jdbc.queryForObject("SELECT revision FROM hub_note_user_revision WHERE owner_id=?", Long.class, TEST_OWNER);
+		jdbc.execute("ALTER TABLE hub_note DROP CONSTRAINT IF EXISTS chk_backup_note_failure");
+		jdbc.execute("ALTER TABLE hub_note ADD CONSTRAINT chk_backup_note_failure CHECK (title <> 'force-note-rollback')");
+		try {
+			assertThatThrownBy(() -> mvc.perform(importPackageRequest(content, token)))
+				.hasCauseInstanceOf(DataIntegrityViolationException.class);
+			assertThat(tasks.count()).isZero();
+			assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM hub_habit WHERE owner_id=?", Integer.class, TEST_OWNER)).isZero();
+			assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM hub_focus_session WHERE owner_id=?", Integer.class, TEST_OWNER)).isZero();
+			assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM hub_note WHERE owner_id=?", Integer.class, TEST_OWNER)).isZero();
+			assertThat(revision()).isEqualTo(beforeTaskRevision);
+			assertThat(jdbc.queryForObject("SELECT revision FROM hub_note_user_revision WHERE owner_id=?", Long.class, TEST_OWNER)).isEqualTo(beforeNoteRevision);
+		} finally {
+			jdbc.execute("ALTER TABLE hub_note DROP CONSTRAINT IF EXISTS chk_backup_note_failure");
+		}
+		mvc.perform(importPackageRequest(content, token)).andExpect(status().isOk())
+			.andExpect(jsonPath("$.addedTasks").value(1)).andExpect(jsonPath("$.addedHabits").value(1))
+			.andExpect(jsonPath("$.addedFocusSessions").value(1)).andExpect(jsonPath("$.addedNotes").value(1));
 	}
 
 	@Test
@@ -306,18 +567,29 @@ class TaskBackupControllerTests {
 		tasks.saveAll(many);
 		mvc.perform(get(BASE + "/export")).andExpect(status().isPayloadTooLarge());
 
-		tasks.deleteAll();
-		many.clear();
-		String largeNotes = "n".repeat(1_500);
-		for (int i = 0; i < 4_000; i++) {
-			many.add(new Task("Task " + i, null, Task.Type.LOCAL, "Geral", "#A986FF", Task.Priority.NORMAL, largeNotes));
-		}
-		tasks.saveAll(many);
-		mvc.perform(get(BASE + "/export")).andExpect(status().isPayloadTooLarge());
+	}
+
+	@Test
+	void rejectsPackageDeclaredLengthAboveLimitBeforeReadingBody() {
+		MockHttpServletRequest request = new MockHttpServletRequest() {
+			@Override public long getContentLengthLong() {
+				return com.github.cleytonorocha.hub.service.TaskBackupService.MAX_PACKAGE_BYTES + 1L;
+			}
+		};
+		request.setContentType("application/zip");
+
+		assertThatThrownBy(() -> backupController.preview(request))
+			.isInstanceOf(ResponseStatusException.class)
+			.satisfies(error -> assertThat(((ResponseStatusException) error).getStatusCode()).isEqualTo(org.springframework.http.HttpStatus.PAYLOAD_TOO_LARGE));
 	}
 
 	private MvcResult preview(String content) throws Exception {
 		return mvc.perform(post(BASE + "/preview").contentType(MediaType.APPLICATION_JSON).content(content))
+			.andExpect(status().isOk()).andReturn();
+	}
+
+	private MvcResult previewPackage(byte[] content) throws Exception {
+		return mvc.perform(post(BASE + "/preview").contentType("application/zip").content(content))
 			.andExpect(status().isOk()).andReturn();
 	}
 
@@ -326,7 +598,75 @@ class TaskBackupControllerTests {
 			.contentType(MediaType.APPLICATION_JSON).content(content);
 	}
 
+	private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder importPackageRequest(byte[] content, String token) {
+		return post(BASE + "/import").header("X-Task-Import-Preview", token)
+			.contentType("application/zip").content(content);
+	}
+
 	private JsonNode json(MvcResult result) throws Exception { return mapper.readTree(result.getResponse().getContentAsString()); }
+
+	private Map<String, byte[]> unzip(byte[] bytes) throws Exception {
+		Map<String, byte[]> entries = new java.util.LinkedHashMap<>();
+		try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(bytes)); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+			java.util.zip.ZipEntry entry;
+			while ((entry = zip.getNextEntry()) != null) {
+				output.reset();
+				zip.transferTo(output);
+				entries.put(entry.getName(), output.toByteArray());
+			}
+		}
+		return entries;
+	}
+
+	private byte[] packageManifest(String content) throws Exception {
+		ByteArrayOutputStream output = new ByteArrayOutputStream();
+		try (ZipOutputStream zip = new ZipOutputStream(output)) {
+			zip.putNextEntry(new java.util.zip.ZipEntry("manifest.json"));
+			zip.write(content.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+			zip.closeEntry();
+		}
+		return output.toByteArray();
+	}
+
+	private String currentReadingFile(BackupReadingItem item, String generatedAt) throws Exception {
+		return mapper.writeValueAsString(Map.of("formatVersion", 10, "generatedAt", Instant.parse(generatedAt), "tasks", List.of(),
+			"series", List.of(), "readingItems", List.of(item), "authors", List.of(), "habits", List.of(),
+			"focusSessions", List.of(), "notes", List.of()));
+	}
+
+	private String currentV10File(List<BackupNote> noteItems, Instant generatedAt) throws Exception {
+		return currentV10File(noteItems, generatedAt, List.of(), List.of(), List.of());
+	}
+
+	private String currentV10File(List<BackupNote> noteItems, Instant generatedAt, List<BackupTask> taskItems,
+			List<BackupHabit> habitItems, List<BackupFocusSession> focusItems) throws Exception {
+		return mapper.writeValueAsString(Map.of("formatVersion", 10, "generatedAt", generatedAt, "tasks", taskItems, "series", List.of(),
+			"readingItems", List.of(), "authors", List.of(), "habits", habitItems, "focusSessions", focusItems, "notes", noteItems));
+	}
+
+	private String partialVersionFile(int version) throws Exception {
+		Map<String, Object> manifest = new java.util.LinkedHashMap<>();
+		manifest.put("formatVersion", version);
+		manifest.put("generatedAt", Instant.parse("2026-10-28T10:00:00Z"));
+		manifest.put("tasks", List.of());
+		manifest.put("series", List.of());
+		manifest.put("readingItems", List.of());
+		manifest.put("authors", List.of());
+		manifest.put("habits", List.of());
+		if (version >= 9) manifest.put("focusSessions", List.of());
+		if (version >= 10) manifest.put("notes", List.of());
+		if (version >= 11) manifest.put("omittedSections", List.of("habits", "focusSessions", "notes"));
+		return mapper.writeValueAsString(manifest);
+	}
+
+	private String exportManifest() throws Exception {
+		MvcResult started = mvc.perform(get(BASE + "/export"))
+			.andExpect(status().isOk()).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.request().asyncStarted()).andReturn();
+		MvcResult response = mvc.performAsyncDispatch(started).andExpect(status().isOk())
+			.andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().contentType("application/zip"))
+			.andReturn();
+		return new String(unzip(response.getResponse().getContentAsByteArray()).get("manifest.json"), java.nio.charset.StandardCharsets.UTF_8);
+	}
 
 	private String file(BackupTask... values) throws Exception {
 		return mapper.writeValueAsString(Map.of("formatVersion", 3, "generatedAt", Instant.parse("2026-10-28T00:00:00Z"),

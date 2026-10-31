@@ -1,4 +1,5 @@
 import { namespacedKey } from '../services/auth'
+import { getUserPreference, updateUserPreference, userPreferencesState } from '../services/userPreferences'
 
 export const CALENDAR_MODES = [
   { id: 'day', label: 'Dia' },
@@ -53,6 +54,7 @@ export function normalizeCalendarPresentations(value = {}) {
 }
 
 export function readCalendarPresentationPreferences() {
+  if (userPreferencesState.ready) return normalizeCalendarPresentations(getUserPreference('calendarPresentations', {}))
   try {
     const stored = window.localStorage.getItem(namespacedKey(CALENDAR_PRESENTATIONS_KEY))
     return stored ? normalizeCalendarPresentations(JSON.parse(stored)) : normalizeCalendarPresentations()
@@ -63,6 +65,9 @@ export function readCalendarPresentationPreferences() {
 
 export function writeCalendarPresentationPreferences(value) {
   const normalized = normalizeCalendarPresentations(value)
-  try { window.localStorage.setItem(namespacedKey(CALENDAR_PRESENTATIONS_KEY), JSON.stringify(normalized)) } catch { /* Keep the current session preference. */ }
+  const current = getUserPreference('calendarPresentations', normalizeCalendarPresentations())
+  for (const { id } of CALENDAR_MODES) {
+    if (normalized[id] !== current[id]) updateUserPreference(`calendarPresentations.${id}`, normalized[id])
+  }
   return normalized
 }

@@ -12,18 +12,19 @@ public final class TaskImportPreviewStore {
 	private static final long TTL_SECONDS = 600;
 	private final Map<String, Entry> entries = new LinkedHashMap<>();
 
-	public synchronized String put(String digest, long taskRevision, long readingRevision,
+	public synchronized String put(String ownerId, String digest, long taskRevision, long readingRevision, long habitRevision, long noteRevision,
 			PortableCopyClassificationSnapshot classification) {
 		purgeExpired();
 		while (entries.size() >= MAX_ENTRIES) entries.remove(entries.keySet().iterator().next());
 		String token = UUID.randomUUID().toString();
-		entries.put(token, new Entry(digest, taskRevision, readingRevision, classification, Instant.now()));
+		entries.put(token, new Entry(ownerId, digest, taskRevision, readingRevision, habitRevision, noteRevision, classification, Instant.now()));
 		return token;
 	}
 
-	public synchronized Entry get(String token) {
+	public synchronized Entry get(String token, String ownerId) {
 		purgeExpired();
-		return entries.get(token);
+		Entry entry = entries.get(token);
+		return entry != null && entry.ownerId().equals(ownerId) ? entry : null;
 	}
 
 	public synchronized void remove(String token) { entries.remove(token); }
@@ -33,6 +34,6 @@ public final class TaskImportPreviewStore {
 		entries.entrySet().removeIf(entry -> entry.getValue().createdAt().isBefore(cutoff));
 	}
 
-	public record Entry(String digest, long taskRevision, long readingRevision,
+	public record Entry(String ownerId, String digest, long taskRevision, long readingRevision, long habitRevision, long noteRevision,
 		PortableCopyClassificationSnapshot classification, Instant createdAt) {}
 }

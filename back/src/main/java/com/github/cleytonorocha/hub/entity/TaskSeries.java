@@ -4,13 +4,15 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import org.hibernate.annotations.TenantId;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.UUID;
 
 @Entity
-@Table(name = "hub_task_series")
+@Table(name = "hub_task_series", uniqueConstraints = @UniqueConstraint(
+	name = "uq_hub_task_series_owner_operation", columnNames = { "owner_id", "operation_id" }))
 public class TaskSeries {
 	@Id
 	@Column(length = 36, nullable = false)
@@ -18,7 +20,7 @@ public class TaskSeries {
 	@TenantId
 	@Column(name = "owner_id", length = 36)
 	private String ownerId;
-	@Column(name = "operation_id", length = 36, nullable = false, unique = true)
+	@Column(name = "operation_id", length = 36, nullable = false)
 	private String operationId;
 	@Column(nullable = false, length = 1024)
 	private String title;

@@ -1,7 +1,9 @@
 package com.github.cleytonorocha.hub.security.google;
 
-/** Supplies the user-scoped encryption key used for the persisted Google refresh token. */
+/** Supplies the installation key and, on Windows, the legacy DPAPI key used during migration. */
 public interface CredentialKeyProvider {
 	byte[] loadKey();
-	byte[] createKey();
+	byte[] loadLegacyKey();
+	boolean isConfigured();
+	boolean isLegacyKeyAvailable();
 }

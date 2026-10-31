@@ -1,6 +1,7 @@
 import { reactive } from 'vue'
 import { resetTaskHub } from './taskHub'
 import { resetTaskSearchState } from './taskSearchState'
+import { resetUserPreferences } from './userPreferences'
 
 export const authState = reactive({ user: null, setupRequired: null, initialized: false, loading: false, error: '' })
 
@@ -13,7 +14,7 @@ async function readJson(response) {
   return payload
 }
 
-async function csrfHeader() {
+export async function csrfHeader() {
   const tokenResponse = await fetch('/api/auth/csrf', { credentials: 'same-origin', cache: 'no-store' })
   const { headerName, token } = await readJson(tokenResponse)
   if (typeof headerName !== 'string' || !headerName.trim() || typeof token !== 'string' || !token.trim()) {
@@ -70,19 +71,18 @@ export async function setupFirstAdmin(account) {
 }
 
 export async function logout() {
-  const accountId = authState.user?.id
   try {
     const [headerName, token] = await csrfHeader()
     await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin', headers: { [headerName]: token } })
   } finally {
-    expireSession(accountId)
+    expireSession()
   }
 }
 
-export function expireSession(accountId = authState.user?.id) {
-  clearAccountLocalData(accountId)
+export function expireSession() {
   resetTaskHub()
   resetTaskSearchState()
+  resetUserPreferences()
   authState.user = null
 }
 
@@ -93,7 +93,3 @@ export function isAdministrator() {
 }
 export function currentAccountKey() { return authState.user?.id || 'anonymous' }
 export function namespacedKey(key) { return `hub:${currentAccountKey()}:${key}` }
-function clearAccountLocalData(accountId) {
-  const prefix = `hub:${accountId || 'anonymous'}:`
-  for (const key of Object.keys(localStorage)) if (key.startsWith(prefix)) localStorage.removeItem(key)
-}

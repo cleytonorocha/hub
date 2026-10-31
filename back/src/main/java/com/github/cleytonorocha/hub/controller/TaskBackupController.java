@@ -31,22 +31,28 @@ public class TaskBackupController {
 
 	@GetMapping("/export")
 	@PreAuthorize("hasAuthority('TASK_READ') and hasAuthority('READING_READ')")
-	public ResponseEntity<?> export() {
+	public ResponseEntity<StreamingResponseBody> export() {
 		PortableCopy copy = backups.exportPortableCopy();
 		String filename = copy.zipped() ? "hub-portable-copy.zip" : "hub-portable-copy.json";
 		MediaType mediaType = copy.zipped() ? MediaType.parseMediaType("application/zip") : MediaType.APPLICATION_JSON;
 		var builder = ResponseEntity.ok().contentType(mediaType).contentLength(copy.size())
 			.header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment().filename(filename).build().toString());
-		if (!copy.zipped()) return builder.body(copy.bytes());
 		StreamingResponseBody body = output -> {
-			try (var input = Files.newInputStream(copy.archivePath())) { input.transferTo(output); }
-			finally { Files.deleteIfExists(copy.archivePath()); }
+			try {
+				if (copy.zipped()) {
+					try (var input = Files.newInputStream(copy.archivePath())) { input.transferTo(output); }
+				} else {
+					output.write(copy.bytes());
+				}
+			} finally {
+				if (copy.archivePath() != null) Files.deleteIfExists(copy.archivePath());
+			}
 		};
 		return builder.body(body);
 	}
 
 	@PostMapping(value = "/preview", consumes = {MediaType.APPLICATION_JSON_VALUE, "application/zip"})
-	@PreAuthorize("hasAuthority('TASK_WRITE') and hasAuthority('READING_WRITE')")
+	@PreAuthorize("isAuthenticated()")
 	public Preview preview(HttpServletRequest request) throws IOException {
 		if (isJson(request)) return backups.preview(readBoundedJson(request));
 		Path file = receivePackage(request);
@@ -55,7 +61,7 @@ public class TaskBackupController {
 	}
 
 	@PostMapping(value = "/import", consumes = {MediaType.APPLICATION_JSON_VALUE, "application/zip"})
-	@PreAuthorize("hasAuthority('TASK_WRITE') and hasAuthority('READING_WRITE')")
+	@PreAuthorize("isAuthenticated()")
 	public Confirmation confirm(@RequestHeader(name = "X-Task-Import-Preview", required = false) String token,
 			HttpServletRequest request) throws IOException {
 		if (token == null || token.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Revise o arquivo antes de importá-lo.");
