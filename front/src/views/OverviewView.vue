@@ -7,7 +7,8 @@ import { useTaskHub } from '../services/taskHub'
 import { readVideoDownloaderCardPreference, readWeeklySummaryPreference } from '../utils/preferences'
 import TaskComposerModal from '../components/TaskComposerModal.vue'
 import ContextMenu from '../components/ContextMenu.vue'
-import { authState } from '../services/auth'
+import { authState, hasPermission, isAdministrator } from '../services/auth'
+import { getNavigationItems } from '../navigation'
 
 const week = getCurrentWeek()
 const today = getDateKey(new Date())
@@ -91,6 +92,8 @@ const greeting = computed(() => {
 const weekLabel = formatWeekLabel(week.days[0], week.days[6])
 const weeklySummaryVisible = ref(readWeeklySummaryPreference())
 const videoDownloaderCardVisible = ref(readVideoDownloaderCardPreference())
+const quickLinks = computed(() => getNavigationItems('overview', hasPermission, isAdministrator)
+  .filter((item) => item.key !== 'video-downloader' || videoDownloaderCardVisible.value))
 const days = week.days.map((date) => ({
   key: getDateKey(date),
   weekday: new Intl.DateTimeFormat('pt-BR', { weekday: 'short' }).format(date).replace('.', ''),
@@ -134,13 +137,16 @@ const days = week.days.map((date) => ({
       </div>
     </div>
 
-    <div v-if="videoDownloaderCardVisible" class="overview-feature-grid">
-      <RouterLink class="overview-feature-card" to="/tools/video-downloader">
-        <span class="overview-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v13a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 18.5v-13Z" /><path d="m10 8 5 4-5 4V8Z" /></svg></span>
-        <span class="overview-feature-copy"><strong>Baixar vídeos</strong><span>Confira um link e escolha a plataforma do vídeo.</span></span>
-        <span class="overview-feature-action" aria-hidden="true">›</span>
-      </RouterLink>
-    </div>
+    <section v-if="quickLinks.length" class="overview-shortcuts" aria-labelledby="quick-links-title">
+      <div class="section-heading overview-shortcuts-heading"><h2 id="quick-links-title">Acessos rápidos</h2></div>
+      <div class="overview-feature-grid">
+        <RouterLink v-for="item in quickLinks" :key="item.key" class="overview-feature-card" :to="item.to">
+          <span class="overview-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use :href="'#icon-' + item.icon" /></svg></span>
+          <span class="overview-feature-copy"><strong>{{ item.label }}</strong><span>{{ item.description }}</span></span>
+          <span class="overview-feature-action" aria-hidden="true">›</span>
+        </RouterLink>
+      </div>
+    </section>
   </section>
 
   <TaskComposerModal v-if="composerOpen" :initial-date="composerDate" :require-date="true" @close="closeComposer" @created="closeComposer" />

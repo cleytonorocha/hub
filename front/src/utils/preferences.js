@@ -1,4 +1,5 @@
 import { namespacedKey } from '../services/auth'
+import { getUserPreference, updateUserPreference, userPreferencesState } from '../services/userPreferences'
 
 export const DEFAULT_TASK_PREFERENCES = Object.freeze({
   category: 'Geral',
@@ -30,19 +31,30 @@ const TASK_PRIORITIES = new Set(['LOW', 'NORMAL', 'HIGH'])
 const HEX_COLOR = /^#[0-9A-Fa-f]{6}$/
 
 export function readWeeklySummaryPreference() {
+  if (userPreferencesState.ready) return getUserPreference('weeklySummaryVisible', true)
   try { return window.localStorage.getItem(namespacedKey(WEEKLY_SUMMARY_KEY)) !== 'false' } catch { return true }
 }
 
 export function writeWeeklySummaryPreference(visible) {
-  try { window.localStorage.setItem(namespacedKey(WEEKLY_SUMMARY_KEY), String(Boolean(visible))) } catch { /* Keep the current session preference. */ }
+  updateUserPreference('weeklySummaryVisible', Boolean(visible))
 }
 
 export function readVideoDownloaderCardPreference() {
+  if (userPreferencesState.ready) return getUserPreference('videoDownloaderCardVisible', true)
   try { return window.localStorage.getItem(namespacedKey(VIDEO_DOWNLOADER_CARD_KEY)) !== 'false' } catch { return true }
 }
 
 export function writeVideoDownloaderCardPreference(visible) {
-  try { window.localStorage.setItem(namespacedKey(VIDEO_DOWNLOADER_CARD_KEY), String(Boolean(visible))) } catch { /* Keep the current session preference. */ }
+  updateUserPreference('videoDownloaderCardVisible', Boolean(visible))
+}
+
+export function readSidebarPinnedPreference() {
+  if (userPreferencesState.ready) return getUserPreference('sidebarPinned', true)
+  try { return window.localStorage.getItem(namespacedKey('sidebar-pinned')) === 'true' } catch { return true }
+}
+
+export function writeSidebarPinnedPreference(pinned) {
+  updateUserPreference('sidebarPinned', Boolean(pinned))
 }
 
 export function normalizeTaskPreferences(value = {}) {
@@ -56,6 +68,7 @@ export function normalizeTaskPreferences(value = {}) {
 }
 
 export function readTaskPreferences() {
+  if (userPreferencesState.ready) return normalizeTaskPreferences(getUserPreference('taskDefaults', DEFAULT_TASK_PREFERENCES))
   try {
     const stored = window.localStorage.getItem(namespacedKey(TASK_DEFAULTS_KEY))
     return stored ? normalizeTaskPreferences(JSON.parse(stored)) : { ...DEFAULT_TASK_PREFERENCES }
@@ -66,6 +79,9 @@ export function readTaskPreferences() {
 
 export function writeTaskPreferences(value) {
   const normalized = normalizeTaskPreferences(value)
-  try { window.localStorage.setItem(namespacedKey(TASK_DEFAULTS_KEY), JSON.stringify(normalized)) } catch { /* Keep the current session preference. */ }
+  const current = getUserPreference('taskDefaults', DEFAULT_TASK_PREFERENCES)
+  for (const key of ['category', 'color', 'priority']) {
+    if (normalized[key] !== current[key]) updateUserPreference(`taskDefaults.${key}`, normalized[key])
+  }
   return normalized
 }

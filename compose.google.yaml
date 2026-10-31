@@ -1,0 +1,14 @@
+services:
+  backend:
+    environment:
+      HUB_GOOGLE_CLIENT_SECRET_FILE: /run/secrets/google_client_secret
+      HUB_GOOGLE_CREDENTIAL_KEY_FILE: /run/secrets/google_credential_key
+    secrets:
+      - google_client_secret
+      - google_credential_key
+
+secrets:
+  google_client_secret:
+    file: ${HUB_GOOGLE_CLIENT_SECRET_FILE:?Set HUB_GOOGLE_CLIENT_SECRET_FILE to a local secret file}
+  google_credential_key:
+    file: ${HUB_GOOGLE_CREDENTIAL_KEY_FILE:?Set HUB_GOOGLE_CREDENTIAL_KEY_FILE to a local 32-byte key file}

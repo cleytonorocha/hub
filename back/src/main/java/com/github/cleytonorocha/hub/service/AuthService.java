@@ -55,6 +55,7 @@ public class AuthService {
 		Map<String, Long> migrated = backfillLegacyData(owner.getId());
 		jdbc.update("INSERT INTO hub_task_user_revision(owner_id, revision) VALUES (?, 0)", owner.getId());
 		jdbc.update("INSERT INTO hub_reading_user_revision(owner_id, revision) VALUES (?, 0)", owner.getId());
+		jdbc.update("INSERT INTO hub_task_user_settings(owner_id, reminder_time) SELECT ?, reminder_time FROM hub_task_settings WHERE settings_id = 1", owner.getId());
 		TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
 			@Override public void afterCommit() { ownershipMigration.migrate(); }
 		});
@@ -83,6 +84,7 @@ public class AuthService {
 		HubUser user = users.saveAndFlush(new HubUser(request.displayName(), request.email(), passwords.encode(request.password()), profile.getId()));
 		jdbc.update("INSERT INTO hub_task_user_revision(owner_id, revision) VALUES (?, 0)", user.getId());
 		jdbc.update("INSERT INTO hub_reading_user_revision(owner_id, revision) VALUES (?, 0)", user.getId());
+		jdbc.update("INSERT INTO hub_task_user_settings(owner_id, reminder_time) VALUES (?, TIME '09:00')", user.getId());
 		return SessionView.from(user, profile);
 	}
 

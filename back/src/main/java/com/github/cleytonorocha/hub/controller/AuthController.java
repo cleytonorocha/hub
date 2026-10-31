@@ -4,6 +4,7 @@ import com.github.cleytonorocha.hub.security.HubPrincipal;
 import com.github.cleytonorocha.hub.service.AuthService;
 import com.github.cleytonorocha.hub.security.LoginAttemptLimiter;
 import com.github.cleytonorocha.hub.service.AuthOwnershipMigration;
+import com.github.cleytonorocha.hub.service.google.GoogleOAuthService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
@@ -33,9 +34,10 @@ public class AuthController {
 	private final SecurityContextRepository contexts;
 	private final LoginAttemptLimiter limiter;
 	private final AuthOwnershipMigration ownershipMigration;
+	private final GoogleOAuthService googleOAuth;
 	public AuthController(AuthService auth, AuthenticationManager authenticationManager, SecurityContextRepository contexts,
-			LoginAttemptLimiter limiter, AuthOwnershipMigration ownershipMigration) {
-		this.auth = auth; this.authenticationManager = authenticationManager; this.contexts = contexts; this.limiter = limiter; this.ownershipMigration = ownershipMigration;
+			LoginAttemptLimiter limiter, AuthOwnershipMigration ownershipMigration, GoogleOAuthService googleOAuth) {
+		this.auth = auth; this.authenticationManager = authenticationManager; this.contexts = contexts; this.limiter = limiter; this.ownershipMigration = ownershipMigration; this.googleOAuth = googleOAuth;
 	}
 
 	@GetMapping("/csrf") public CsrfView csrf(CsrfToken token) { return new CsrfView(token.getHeaderName(), token.getToken()); }
@@ -66,6 +68,7 @@ public class AuthController {
 		return auth.current((HubPrincipal) authentication.getPrincipal());
 	}
 	@PostMapping("/logout") public void logout(HttpServletRequest request, HttpServletResponse response, Authentication authentication) {
+		if (authentication != null && authentication.getPrincipal() instanceof HubPrincipal principal) googleOAuth.clearSession(principal.id());
 		new SecurityContextLogoutHandler().logout(request, response, authentication);
 	}
 	private static void requireLoopbackOrigin(HttpServletRequest request) {

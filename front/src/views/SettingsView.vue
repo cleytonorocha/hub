@@ -102,7 +102,7 @@ function systemPresentationLabel(mode) {
               <option v-for="item in taskPriorities" :key="item.value" :value="item.value">{{ item.label }}</option>
             </select>
           </div>
-          <p class="settings-storage-note">As preferências são salvas neste navegador.</p>
+          <p class="settings-storage-note">As preferências são salvas na sua conta Hub e ficam disponíveis nos seus dispositivos.</p>
         </section>
 
         <section id="calendar-settings" class="settings-group" aria-labelledby="calendar-settings-title">
@@ -117,7 +117,7 @@ function systemPresentationLabel(mode) {
               <option v-for="presentation in CALENDAR_PRESENTATIONS[mode.id]" :key="presentation.id" :value="presentation.id">{{ presentation.label }}</option>
             </select>
           </div>
-          <p class="settings-storage-note">As preferências são salvas neste navegador.</p>
+          <p class="settings-storage-note">As preferências são salvas na sua conta Hub e ficam disponíveis nos seus dispositivos.</p>
         </section>
 
           <section id="data-settings" class="settings-group" aria-label="Cópia portátil e importação de dados">

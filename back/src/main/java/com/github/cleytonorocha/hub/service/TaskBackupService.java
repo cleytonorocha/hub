@@ -10,6 +10,8 @@ import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
@@ -31,22 +33,40 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.github.cleytonorocha.hub.dto.TaskBackupDtos.BackupChecklistItem;
 import com.github.cleytonorocha.hub.dto.TaskBackupDtos.BackupAuthor;
+import com.github.cleytonorocha.hub.dto.TaskBackupDtos.BackupHabit;
+import com.github.cleytonorocha.hub.dto.TaskBackupDtos.BackupHabitPause;
+import com.github.cleytonorocha.hub.dto.TaskBackupDtos.BackupHabitSchedule;
+import com.github.cleytonorocha.hub.dto.TaskBackupDtos.BackupFocusSession;
 import com.github.cleytonorocha.hub.dto.TaskBackupDtos.BackupFile;
+import com.github.cleytonorocha.hub.dto.TaskBackupDtos.BackupNote;
 import com.github.cleytonorocha.hub.dto.TaskBackupDtos.BackupReadingItem;
 import com.github.cleytonorocha.hub.dto.TaskBackupDtos.BackupSeries;
 import com.github.cleytonorocha.hub.dto.TaskBackupDtos.BackupTask;
 import com.github.cleytonorocha.hub.dto.TaskBackupDtos.Confirmation;
 import com.github.cleytonorocha.hub.dto.TaskBackupDtos.Preview;
+import com.github.cleytonorocha.hub.dto.TaskBackupDtos.NoteSummary;
 import com.github.cleytonorocha.hub.dto.TaskBackupDtos.ReadingItemSample;
 import com.github.cleytonorocha.hub.dto.TaskBackupDtos.TaskSample;
 import com.github.cleytonorocha.hub.entity.ReadingItem;
 import com.github.cleytonorocha.hub.entity.ReadingAuthor;
+import com.github.cleytonorocha.hub.entity.Note;
+import com.github.cleytonorocha.hub.entity.Habit;
+import com.github.cleytonorocha.hub.entity.HabitCheckIn;
+import com.github.cleytonorocha.hub.entity.HabitPause;
+import com.github.cleytonorocha.hub.entity.HabitSchedule;
 import com.github.cleytonorocha.hub.entity.Task;
 import com.github.cleytonorocha.hub.entity.TaskSeries;
 import com.github.cleytonorocha.hub.repository.ReadingItemRepository;
 import com.github.cleytonorocha.hub.repository.ReadingAuthorRepository;
+import com.github.cleytonorocha.hub.repository.HabitCheckInRepository;
+import com.github.cleytonorocha.hub.repository.HabitPauseRepository;
+import com.github.cleytonorocha.hub.repository.HabitRepository;
+import com.github.cleytonorocha.hub.repository.HabitScheduleRepository;
+import com.github.cleytonorocha.hub.repository.FocusSessionRepository;
+import com.github.cleytonorocha.hub.repository.NoteRepository;
 import com.github.cleytonorocha.hub.repository.TaskRepository;
 import com.github.cleytonorocha.hub.repository.TaskSeriesRepository;
+import com.github.cleytonorocha.hub.security.AuthContext;
 import com.github.cleytonorocha.hub.service.ReadingCoverStorageService.StoredCover;
 
 import tools.jackson.core.JsonParser;
@@ -58,17 +78,32 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 public class TaskBackupService {
 	public static final int MAX_FILE_BYTES = 5 * 1024 * 1024;
+	public static final int MAX_MANIFEST_BYTES = 90 * 1024 * 1024;
 	public static final long MAX_PACKAGE_BYTES = 100L * 1024 * 1024;
 	public static final long MAX_PACKAGE_EXPANDED_BYTES = 100L * 1024 * 1024;
 	public static final int MAX_TASKS = 5_000;
 	public static final int MAX_READING_ITEMS = 5_000;
-	private static final int FORMAT_VERSION = 7;
+	public static final int MAX_HABITS = 5_000;
+	public static final int MAX_FOCUS_SESSIONS = 50_000;
+	public static final int MAX_NOTES = 5_000;
+	private static final int FORMAT_VERSION = 11;
 	private static final int LEGACY_FORMAT_VERSION = 4;
 	private static final Set<String> ROOT_FIELDS_V1 = Set.of("formatVersion", "generatedAt", "tasks");
 	private static final Set<String> ROOT_FIELDS_V2_V3 = Set.of("formatVersion", "generatedAt", "tasks", "series");
 	private static final Set<String> ROOT_FIELDS_V4 = Set.of("formatVersion", "generatedAt", "tasks", "series", "readingItems");
 	private static final Set<String> ROOT_FIELDS_V5 = ROOT_FIELDS_V4;
 	private static final Set<String> ROOT_FIELDS_V7 = Set.of("formatVersion", "generatedAt", "tasks", "series", "readingItems", "authors");
+	private static final Set<String> ROOT_FIELDS_V8 = Set.of("formatVersion", "generatedAt", "tasks", "series", "readingItems", "authors", "habits");
+	private static final Set<String> ROOT_FIELDS_V9 = Set.of("formatVersion", "generatedAt", "tasks", "series", "readingItems", "authors", "habits", "focusSessions");
+	private static final Set<String> ROOT_FIELDS_V10 = Set.of("formatVersion", "generatedAt", "tasks", "series", "readingItems", "authors", "habits", "focusSessions", "notes");
+	private static final Set<String> ROOT_FIELDS_V11 = Set.of("formatVersion", "generatedAt", "tasks", "series", "readingItems", "authors", "habits", "focusSessions", "notes", "omittedSections");
+	private static final List<String> OMITTABLE_SECTION_ORDER = List.of("habits", "focusSessions", "notes");
+	private static final Set<String> OMITTABLE_SECTIONS = Set.copyOf(OMITTABLE_SECTION_ORDER);
+	private static final Set<String> HABIT_FIELDS = Set.of("id", "name", "startDate", "createdAt", "updatedAt", "schedules", "pauses", "checkIns");
+	private static final Set<String> HABIT_SCHEDULE_FIELDS = Set.of("effectiveFrom", "weekdaysMask");
+	private static final Set<String> HABIT_PAUSE_FIELDS = Set.of("pausedOn", "resumedOn");
+	private static final Set<String> FOCUS_SESSION_FIELDS = Set.of("id", "objective", "plannedSeconds", "focusedSeconds", "state", "startedAt", "resumedAt", "pausedAt", "endedAt", "endReason", "taskId");
+	private static final Set<String> NOTE_FIELDS = Set.of("id", "title", "body", "tags", "pinned", "archived", "relatedTaskId", "relatedTaskUnavailable", "createdAt", "updatedAt");
 	private static final Set<String> TASK_FIELDS_V1 = Set.of("id", "title", "dueDate", "dueTime", "completed", "type", "category", "color", "priority", "notes");
 	private static final Set<String> TASK_FIELDS_V2 = Set.of("id", "title", "dueDate", "dueTime", "completed", "type", "category", "color", "priority", "notes", "seriesId", "seriesPosition");
 	private static final Set<String> TASK_FIELDS = Set.of("id", "title", "dueDate", "dueTime", "completed", "type", "category", "color", "priority", "notes", "seriesId", "seriesPosition", "checklist");
@@ -91,11 +126,22 @@ public class TaskBackupService {
 	private final ObjectMapper mapper;
 	private final ReadingCoverStorageService covers;
 	private final ReadingItemAssociationService readingAssociations;
+	private final HabitRepository habits;
+	private final HabitScheduleRepository habitSchedules;
+	private final HabitPauseRepository habitPauses;
+	private final HabitCheckInRepository habitCheckIns;
+	private final HabitCollectionRevision habitCollectionRevision;
+	private final FocusSessionRepository focusSessions;
+	private final NoteRepository notes;
+	private final NoteService noteService;
+	private final NoteCollectionRevision noteCollectionRevision;
 
 	public TaskBackupService(TaskRepository tasks, TaskSeriesRepository series, ReadingItemRepository readingItems,
 		TaskChecklistService checklists, TaskCollectionRevision collectionRevision, ReadingCollectionRevision readingCollectionRevision,
 		TaskImportPreviewStore previews, ObjectMapper mapper, ReadingCoverStorageService covers, ReadingAuthorRepository authors,
-		ReadingItemAssociationService readingAssociations) {
+		ReadingItemAssociationService readingAssociations, HabitRepository habits, HabitScheduleRepository habitSchedules,
+		HabitPauseRepository habitPauses, HabitCheckInRepository habitCheckIns, HabitCollectionRevision habitCollectionRevision,
+		FocusSessionRepository focusSessions, NoteRepository notes, NoteService noteService, NoteCollectionRevision noteCollectionRevision) {
 		this.tasks = tasks;
 		this.series = series;
 		this.readingItems = readingItems;
@@ -107,27 +153,57 @@ public class TaskBackupService {
 		this.mapper = mapper;
 		this.covers = covers;
 		this.readingAssociations = readingAssociations;
+		this.habits = habits;
+		this.habitSchedules = habitSchedules;
+		this.habitPauses = habitPauses;
+		this.habitCheckIns = habitCheckIns;
+		this.habitCollectionRevision = habitCollectionRevision;
+		this.focusSessions = focusSessions;
+		this.notes = notes;
+		this.noteService = noteService;
+		this.noteCollectionRevision = noteCollectionRevision;
 	}
 
 	@Transactional
 	public PortableCopy exportPortableCopy() {
+		if (!AuthContext.hasPermission("TASK_READ") || !AuthContext.hasPermission("READING_READ"))
+			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "É necessário acesso de leitura em todas as áreas base para exportar a cópia.");
 		collectionRevision.lock();
 		readingCollectionRevision.lock();
+		habitCollectionRevision.lock();
+		noteCollectionRevision.lock();
+		String ownerId = AuthContext.userId();
+		Instant snapshotAt = Instant.now();
+		List<String> omittedSections = new ArrayList<>();
+		List<BackupFocusSession> portableFocusSessions = List.of();
+		if (AuthContext.hasPermission("FOCUS_READ")) {
+			focusSessions.lockOwnerSlot(ownerId);
+			List<com.github.cleytonorocha.hub.dto.FocusSessionDtos.SessionView> localFocusSessions = focusSessions.allForCopy(ownerId);
+			if (localFocusSessions.size() > MAX_FOCUS_SESSIONS) throw tooLarge("A cópia excede o limite de 50.000 sessões de foco.");
+			portableFocusSessions = localFocusSessions.stream().map(session -> toBackupFocusSession(session, snapshotAt)).toList();
+		} else omittedSections.add("focusSessions");
 		List<Task> localTasks = tasks.findAllByTypeOrderByIdAsc(Task.Type.LOCAL);
 		if (localTasks.size() > MAX_TASKS) throw tooLarge("A cópia excede o limite de 5.000 tarefas.");
 		List<BackupSeries> localSeries = series.findAll().stream().map(this::toBackupSeries).toList();
 		List<ReadingItem> localReadingItems = readingItems.findAllByOrderByIdAsc();
 		if (localReadingItems.size() > MAX_READING_ITEMS) throw tooLarge("A cópia excede o limite de 5.000 itens de leitura.");
 		localReadingItems = loadReadingItemsWithTags(localReadingItems);
-		List<BackupReadingItem> portableReadings = localReadingItems.stream().map(item -> toBackupReadingItem(item, true)).toList();
+		List<BackupReadingItem> portableReadings = localReadingItems.stream().map(item -> toBackupReadingItem(item, true, ownerId)).toList();
 		List<BackupAuthor> portableAuthors = authors.findAllByOrderByNormalizedNameAscIdAsc().stream()
 			.map(author -> new BackupAuthor(author.getId(), author.getName())).toList();
+		List<BackupHabit> portableHabits = List.of();
+		if (AuthContext.hasPermission("HABITS_READ")) portableHabits = exportHabits();
+		else omittedSections.add("habits");
+		List<BackupNote> portableNotes = List.of();
+		if (AuthContext.hasPermission("NOTES_READ")) portableNotes = exportNotes(localTasks);
+		else omittedSections.add("notes");
+		omittedSections.sort(java.util.Comparator.comparingInt(OMITTABLE_SECTION_ORDER::indexOf));
 		BackupFile file = new BackupFile(FORMAT_VERSION, Instant.now(), localTasks.stream().map(this::toBackupTask).toList(),
-			localSeries, portableReadings, portableAuthors);
+			localSeries, portableReadings, portableAuthors, portableHabits, portableFocusSessions, portableNotes, omittedSections);
 		byte[] manifest;
 		try { manifest = mapper.writeValueAsBytes(file); }
 		catch (Exception error) { throw new IllegalStateException("Não foi possível preparar a cópia portátil do Hub."); }
-		if (manifest.length > MAX_FILE_BYTES) throw tooLarge("O manifesto da cópia excede 5 MiB e não foi exportado.");
+		if (manifest.length > MAX_MANIFEST_BYTES) throw tooLarge("O manifesto da cópia excede 90 MiB e não foi exportado.");
 		Path archive = null;
 		try {
 			archive = Files.createTempFile("hub-portable-copy-", ".zip");
@@ -139,7 +215,7 @@ public class TaskBackupService {
 				for (BackupReadingItem item : portableReadings) {
 					if (item.coverSha256() == null) continue;
 					ReadingItem reading = readingById.get(item.id());
-					byte[] image = covers.read(reading.getCoverImageName(), false);
+					byte[] image = covers.read(ownerId, reading.getCoverImageName(), false);
 					if (image.length != item.coverSize() || !sha256(image).equals(item.coverSha256())) {
 						throw new IllegalStateException("Uma imagem de capa mudou durante a exportação.");
 					}
@@ -176,11 +252,22 @@ public class TaskBackupService {
 	}
 
 	private Preview preview(DecodedBackup decoded) {
+		requireTaskImportPermission(decoded);
+		requireReadingImportPermission(decoded);
+		requireHabitImportPermission(decoded);
+		requireFocusImportPermission(decoded);
+		requireNoteImportPermission(decoded);
 		long taskRevision = collectionRevision.lock();
 		long readingRevision = readingCollectionRevision.lock();
-		TaskBackupClassification taskClassification = classifyTasks(decoded, tasks.findAllByTypeOrderByIdAsc(Task.Type.LOCAL));
+		long habitRevision = habitCollectionRevision.lock();
+		long noteRevision = noteCollectionRevision.lock();
+		List<Task> localTasks = tasks.findAllByTypeOrderByIdAsc(Task.Type.LOCAL);
+		TaskBackupClassification taskClassification = classifyTasks(decoded, localTasks);
 		ReadingBackupClassification readingClassification = classifyReadingItems(decoded, loadReadingItemsWithTags(readingItems.findAllByOrderByIdAsc()));
-		return issuePreview(decoded, taskRevision, readingRevision, taskClassification, readingClassification);
+		HabitBackupClassification habitClassification = classifyHabits(decoded, habits.findAllByOrderByStartDateAscCreatedAtAsc());
+		FocusBackupClassification focusClassification = classifyFocusSessions(decoded, focusSessions.allForCopy(AuthContext.userId()), currentActiveId());
+		NoteBackupClassification noteClassification = classifyNotes(decoded, taskClassification, noteService.loadForBackup());
+		return issuePreview(decoded, taskRevision, readingRevision, habitRevision, noteRevision, taskClassification, readingClassification, habitClassification, focusClassification, noteClassification);
 	}
 
 	@Transactional
@@ -198,30 +285,50 @@ public class TaskBackupService {
 	}
 
 	private Confirmation confirm(DecodedBackup decoded, String token) {
-		TaskImportPreviewStore.Entry entry = previews.get(token);
+		requireTaskImportPermission(decoded);
+		requireReadingImportPermission(decoded);
+		requireHabitImportPermission(decoded);
+		requireFocusImportPermission(decoded);
+		requireNoteImportPermission(decoded);
+		TaskImportPreviewStore.Entry entry = previews.get(token, AuthContext.userId());
 		if (entry == null) throw new ResponseStatusException(HttpStatus.CONFLICT, "A prévia expirou. Revise o arquivo novamente.");
 		if (!entry.digest().equals(decoded.digest())) throw invalid("O arquivo mudou depois da prévia. Revise-o novamente.");
-		if (!entry.classification().tasks().conflictIds().isEmpty() || !entry.classification().readingItems().conflictIds().isEmpty()) throw new ResponseStatusException(HttpStatus.CONFLICT, "Resolva os conflitos mostrados na prévia antes de importar.");
+		if (!entry.classification().tasks().conflictIds().isEmpty() || !entry.classification().readingItems().conflictIds().isEmpty()
+				|| !entry.classification().habits().conflictIds().isEmpty() || !entry.classification().focusSessions().conflictIds().isEmpty()
+				|| !entry.classification().notes().conflictIds().isEmpty() || entry.classification().focusSessions().activeSlotConflict()) throw new ResponseStatusException(HttpStatus.CONFLICT, "Resolva os conflitos mostrados na prévia antes de importar.");
 
 		long taskRevision = collectionRevision.lock();
 		long readingRevision = readingCollectionRevision.lock();
-		TaskBackupClassification currentTasks = classifyTasks(decoded, tasks.findAllByTypeOrderByIdAsc(Task.Type.LOCAL));
+		long habitRevision = habitCollectionRevision.lock();
+		long noteRevision = noteCollectionRevision.lock();
+		String ownerId = AuthContext.userId();
+		focusSessions.lockOwnerSlot(ownerId);
+		List<Task> localTasks = tasks.findAllByTypeOrderByIdAsc(Task.Type.LOCAL);
+		TaskBackupClassification currentTasks = classifyTasks(decoded, localTasks);
 		ReadingBackupClassification currentReading = classifyReadingItems(decoded, loadReadingItemsWithTags(readingItems.findAllByOrderByIdAsc()));
-		PortableCopyClassificationSnapshot currentSnapshot = snapshot(currentTasks, currentReading);
-		if (taskRevision != entry.taskRevision() || readingRevision != entry.readingRevision()
+		HabitBackupClassification currentHabits = classifyHabits(decoded, habits.findAllByOrderByStartDateAscCreatedAtAsc());
+		FocusBackupClassification currentFocus = classifyFocusSessions(decoded, focusSessions.allForCopy(ownerId), currentActiveId());
+		NoteBackupClassification currentNotes = classifyNotes(decoded, currentTasks, noteService.loadForBackup());
+		PortableCopyClassificationSnapshot currentSnapshot = snapshot(currentTasks, currentReading, currentHabits, currentFocus, currentNotes);
+		if (taskRevision != entry.taskRevision() || readingRevision != entry.readingRevision() || habitRevision != entry.habitRevision() || noteRevision != entry.noteRevision()
 				|| !currentSnapshot.equals(entry.classification())) {
-			Preview refreshed = issuePreview(decoded, taskRevision, readingRevision, currentTasks, currentReading);
+			Preview refreshed = issuePreview(decoded, taskRevision, readingRevision, habitRevision, noteRevision, currentTasks, currentReading, currentHabits, currentFocus, currentNotes);
 			return new Confirmation("REVIEW_REQUIRED", refreshed, 0, 0, 0, 0, 0, 0);
 		}
-		if (!currentTasks.conflictIds().isEmpty() || !currentReading.conflictIds().isEmpty()) throw new ResponseStatusException(HttpStatus.CONFLICT, "O acervo mudou e há conflitos. Revise a prévia atualizada.");
+		if (!currentTasks.conflictIds().isEmpty() || !currentReading.conflictIds().isEmpty() || !currentHabits.conflictIds().isEmpty()
+				|| !currentFocus.conflictIds().isEmpty() || currentFocus.activeSlotConflict() || !currentNotes.conflictIds().isEmpty()) throw new ResponseStatusException(HttpStatus.CONFLICT, "A cópia contém conflitos. Revise a prévia atualizada.");
+		if (notes.count() + currentNotes.newNotes().size() > MAX_NOTES) throw new ResponseStatusException(HttpStatus.CONFLICT, "O acervo atingiria o limite de 5.000 notas. Remova notas antes de importar esta cópia.");
 		boolean missingSeries = decoded.file().series() != null && decoded.file().series().stream().anyMatch(item -> series.findById(item.id()).isEmpty());
 		Set<String> localAuthorIds = authors.findAll().stream().map(ReadingAuthor::getId).collect(java.util.stream.Collectors.toSet());
 		List<BackupAuthor> newAuthors = decoded.file().authors() == null ? List.of() : decoded.file().authors().stream()
 			.filter(author -> !localAuthorIds.contains(author.id())).toList();
-		if (currentTasks.newTasks().isEmpty() && !missingSeries && currentReading.newItems().isEmpty() && newAuthors.isEmpty()) {
+		if (currentTasks.newTasks().isEmpty() && !missingSeries && currentReading.newItems().isEmpty() && newAuthors.isEmpty()
+				&& currentHabits.newHabits().isEmpty() && currentFocus.newSessions().isEmpty() && currentNotes.newNotes().isEmpty()) {
 			removePreviewAfterCommit(token);
 			return new Confirmation("IMPORTED", null, 0, currentTasks.identicalIds().size(), currentTasks.repeatedIdenticalIds(),
-				0, currentReading.identicalIds().size(), currentReading.repeatedIdenticalIds());
+				0, currentReading.identicalIds().size(), currentReading.repeatedIdenticalIds(), 0, newAuthors.size(),
+				0, currentHabits.identicalIds().size(), currentHabits.repeatedIdenticalIds(), 0, currentFocus.identicalIds().size(),
+				0, currentNotes.identicalIds().size(), currentNotes.repeatedIdenticalIds());
 		}
 
 		List<TaskSeries> newSeries = (decoded.file().series() == null ? List.<BackupSeries>of() : decoded.file().series()).stream()
@@ -233,7 +340,7 @@ public class TaskBackupService {
 			for (BackupReadingItem item : currentReading.newItems()) {
 				Path source = decoded.coverAssets().get(item.id());
 				if (source == null) continue;
-				StoredCover stored = covers.storePortable(Files.readAllBytes(source), item.coverFormat());
+				StoredCover stored = covers.storePortable(ownerId, Files.readAllBytes(source), item.coverFormat());
 				newlyStoredCovers.add(stored.name());
 				coverNames.put(item.id(), stored.name());
 				coverDigests.put(item.id(), stored.sha256());
@@ -251,21 +358,41 @@ public class TaskBackupService {
 			readingItems.saveAll(readingAdditions);
 			readingItems.flush();
 			for (ReadingItem item : readingAdditions) readingAssociations.save(item);
-			if (!newlyStoredCovers.isEmpty()) cleanupImportedCoversOnRollback(newlyStoredCovers);
+			List<Habit> habitAdditions = currentHabits.newHabits().stream().map(this::restoreHabit).toList();
+			habits.saveAll(habitAdditions);
+			habits.flush();
+			for (Habit habit : habitAdditions) {
+				BackupHabit backup = decoded.uniqueHabits().get(habit.getId());
+				habitSchedules.saveAll(backup.schedules().stream().map(item -> new HabitSchedule(habit.getId(), item.effectiveFrom(), item.weekdaysMask())).toList());
+				habitPauses.saveAll(backup.pauses().stream().map(item -> restorePause(habit.getId(), item)).toList());
+				habitCheckIns.saveAll(backup.checkIns().stream().map(date -> new HabitCheckIn(habit.getId(), date, Instant.now())).toList());
+			}
+			for (BackupFocusSession session : currentFocus.newSessions()) focusSessions.restore(ownerId, session);
+			List<Note> noteAdditions = currentNotes.newNotes().stream().map(item -> noteService.restoreImport(item.id(), item.title(), item.body(), item.tags(),
+				item.pinned(), item.archived(), item.relatedTaskId(), item.relatedTaskUnavailable(), item.createdAt(), item.updatedAt())).toList();
+			notes.saveAll(noteAdditions);
+			notes.flush();
+			for (Note note : noteAdditions) noteService.saveImportedTags(note);
+			if (!newlyStoredCovers.isEmpty()) cleanupImportedCoversOnRollback(ownerId, newlyStoredCovers);
 			if (!additions.isEmpty() || !newSeries.isEmpty()) collectionRevision.increment();
 			if (!readingAdditions.isEmpty() || !newAuthors.isEmpty()) readingCollectionRevision.increment();
+			if (!habitAdditions.isEmpty()) habitCollectionRevision.increment();
+			if (!noteAdditions.isEmpty()) noteCollectionRevision.increment();
 			removePreviewAfterCommit(token);
 			return new Confirmation("IMPORTED", null, additions.size(), currentTasks.identicalIds().size(), currentTasks.repeatedIdenticalIds(),
-				readingAdditions.size(), currentReading.identicalIds().size(), currentReading.repeatedIdenticalIds(), newlyStoredCovers.size(), newAuthors.size());
+				readingAdditions.size(), currentReading.identicalIds().size(), currentReading.repeatedIdenticalIds(), newlyStoredCovers.size(), newAuthors.size(),
+				habitAdditions.size(), currentHabits.identicalIds().size(), currentHabits.repeatedIdenticalIds(),
+				currentFocus.newSessions().size(), currentFocus.identicalIds().size(), noteAdditions.size(), currentNotes.identicalIds().size(), currentNotes.repeatedIdenticalIds());
 		} catch (RuntimeException | IOException error) {
-			newlyStoredCovers.forEach(covers::delete);
+			newlyStoredCovers.forEach(name -> covers.delete(ownerId, name));
 			if (error instanceof RuntimeException runtime) throw runtime;
 			throw new IllegalStateException("Não foi possível preparar as imagens da cópia.", error);
 		}
 	}
 
-	private Preview issuePreview(DecodedBackup decoded, long taskRevision, long readingRevision,
-			TaskBackupClassification taskClassification, ReadingBackupClassification readingClassification) {
+	private Preview issuePreview(DecodedBackup decoded, long taskRevision, long readingRevision, long habitRevision, long noteRevision,
+			TaskBackupClassification taskClassification, ReadingBackupClassification readingClassification, HabitBackupClassification habitClassification,
+			FocusBackupClassification focusClassification, NoteBackupClassification noteClassification) {
 		List<TaskSample> samples = taskClassification.newTasks().stream().limit(10)
 			.map(task -> new TaskSample(task.id(), task.title(), task.dueDate())).toList();
 		List<TaskSample> conflictSamples = taskClassification.conflictIds().stream().limit(20)
@@ -278,7 +405,9 @@ public class TaskBackupService {
 			.map(decoded.uniqueReadingItems()::get)
 			.filter(item -> item != null)
 			.map(item -> new ReadingItemSample(item.id(), item.title(), item.type(), item.archived())).toList();
-		boolean hasConflicts = !taskClassification.conflictIds().isEmpty() || !readingClassification.conflictIds().isEmpty();
+		boolean hasConflicts = !taskClassification.conflictIds().isEmpty() || !readingClassification.conflictIds().isEmpty()
+			|| !habitClassification.conflictIds().isEmpty() || !focusClassification.conflictIds().isEmpty() || focusClassification.activeSlotConflict()
+			|| !noteClassification.conflictIds().isEmpty();
 		List<ReadingAuthor> localAuthors = authors.findAll();
 		Map<String, ReadingAuthor> localAuthorsById = new LinkedHashMap<>();
 		Map<String, ReadingAuthor> localAuthorsByName = new LinkedHashMap<>();
@@ -289,7 +418,9 @@ public class TaskBackupService {
 			ReadingAuthor localByName = localAuthorsByName.get(ReadingAuthor.normalize(author.name()));
 			return (localById != null && !localById.getName().equals(author.name())) || (localByName != null && !localByName.getId().equals(author.id()));
 		}).count();
-		boolean hasNewItems = !taskClassification.newTasks().isEmpty() || !readingClassification.newItems().isEmpty() || !newAuthors.isEmpty();
+		boolean hasNewItems = !taskClassification.newTasks().isEmpty() || !readingClassification.newItems().isEmpty() || !newAuthors.isEmpty()
+			|| !habitClassification.newHabits().isEmpty() || !focusClassification.newSessions().isEmpty() || !noteClassification.newNotes().isEmpty();
+		boolean noteLimitExceeded = notes.count() + noteClassification.newNotes().size() > MAX_NOTES;
 		int newCovers = (int) readingClassification.newItems().stream().filter(item -> item.coverSha256() != null).count();
 		int identicalCovers = (int) readingClassification.identicalIds().stream()
 			.map(decoded.uniqueReadingItems()::get).filter(item -> item != null && item.coverSha256() != null).count();
@@ -300,25 +431,128 @@ public class TaskBackupService {
 			conflictSamples, taskClassification.conflictIds().stream().limit(20).toList(),
 			decoded.file().readingItems().size(), readingClassification.newItems().size(), readingClassification.identicalIds().size(),
 			readingClassification.conflictIds().size(), readingClassification.repeatedIdenticalIds(), readingSamples,
-			readingConflictSamples, readingClassification.conflictIds().stream().limit(20).toList(), !hasConflicts && (hasNewItems || hasNewSeries),
+			readingConflictSamples, readingClassification.conflictIds().stream().limit(20).toList(), !hasConflicts && !noteLimitExceeded && (hasNewItems || hasNewSeries),
 			decoded.file().formatVersion() >= 5 ? (int) decoded.file().readingItems().stream().filter(item -> item.coverSha256() != null).count() : 0,
-			newCovers, identicalCovers, decoded.file().authors() == null ? 0 : decoded.file().authors().size(), newAuthors.size(), conflictingAuthors);
-		String token = previews.put(decoded.digest(), taskRevision, readingRevision, snapshot(taskClassification, readingClassification));
+			newCovers, identicalCovers, decoded.file().authors() == null ? 0 : decoded.file().authors().size(), newAuthors.size(), conflictingAuthors,
+			decoded.file().habits().size(), habitClassification.newHabits().size(), habitClassification.identicalIds().size(),
+			habitClassification.conflictIds().size(), habitClassification.repeatedIdenticalIds(), decoded.file().focusSessions().size(),
+			focusClassification.newSessions().size(), focusClassification.identicalIds().size(), focusClassification.conflictIds().size(), focusClassification.activeSlotConflict(),
+			new NoteSummary(decoded.file().notes().size(), noteClassification.newNotes().size(), noteClassification.identicalIds().size(),
+				noteClassification.conflictIds().size(), noteClassification.repeatedIdenticalIds(),
+				(int) noteClassification.newNotes().stream().filter(BackupNote::relatedTaskUnavailable).count(), noteLimitExceeded),
+			decoded.file().omittedSections());
+		String token = previews.put(AuthContext.userId(), decoded.digest(), taskRevision, readingRevision, habitRevision, noteRevision,
+			snapshot(taskClassification, readingClassification, habitClassification, focusClassification, noteClassification));
 		return new Preview(token, withoutToken.formatVersion(), withoutToken.generatedAt(), withoutToken.totalTasks(),
 			withoutToken.newTasks(), withoutToken.identicalTasks(), withoutToken.conflictingTasks(),
 			withoutToken.repeatedIdenticalIds(), withoutToken.samples(), withoutToken.conflicts(), withoutToken.conflictIds(),
 			withoutToken.totalReadingItems(), withoutToken.newReadingItems(), withoutToken.identicalReadingItems(),
 			withoutToken.conflictingReadingItems(), withoutToken.repeatedIdenticalReadingIds(), withoutToken.readingSamples(),
 			withoutToken.readingConflicts(), withoutToken.readingConflictIds(), withoutToken.canImport(), withoutToken.totalCovers(),
-			withoutToken.newCovers(), withoutToken.identicalCovers(), withoutToken.totalAuthors(), withoutToken.newAuthors(), withoutToken.conflictingAuthors());
+			withoutToken.newCovers(), withoutToken.identicalCovers(), withoutToken.totalAuthors(), withoutToken.newAuthors(), withoutToken.conflictingAuthors(),
+			withoutToken.totalHabits(), withoutToken.newHabits(), withoutToken.identicalHabits(), withoutToken.conflictingHabits(), withoutToken.repeatedIdenticalHabitIds(),
+			withoutToken.totalFocusSessions(), withoutToken.newFocusSessions(), withoutToken.identicalFocusSessions(), withoutToken.conflictingFocusSessions(), withoutToken.focusSlotConflict(), withoutToken.notes(), withoutToken.omittedSections());
 	}
 
-	private PortableCopyClassificationSnapshot snapshot(TaskBackupClassification tasks, ReadingBackupClassification readings) {
+	private PortableCopyClassificationSnapshot snapshot(TaskBackupClassification tasks, ReadingBackupClassification readings, HabitBackupClassification habits,
+			FocusBackupClassification focus, NoteBackupClassification notes) {
 		return new PortableCopyClassificationSnapshot(
 			new TaskBackupClassificationSnapshot(tasks.newTasks().stream().map(BackupTask::id).toList(),
 				tasks.identicalIds(), tasks.conflictIds(), tasks.repeatedIdenticalIds()),
 			new ReadingBackupClassificationSnapshot(readings.newItems().stream().map(BackupReadingItem::id).toList(),
-				readings.identicalIds(), readings.conflictIds(), readings.repeatedIdenticalIds()));
+				readings.identicalIds(), readings.conflictIds(), readings.repeatedIdenticalIds()),
+			new HabitBackupClassificationSnapshot(habits.newHabits().stream().map(BackupHabit::id).toList(),
+				habits.identicalIds(), habits.conflictIds(), habits.repeatedIdenticalIds()),
+			new FocusBackupClassificationSnapshot(focus.newSessions().stream().map(BackupFocusSession::id).toList(),
+				focus.identicalIds(), focus.conflictIds(), focus.repeatedIdenticalIds(), focus.activeSlotConflict()),
+			new NoteBackupClassificationSnapshot(notes.newNotes().stream().map(BackupNote::id).toList(), notes.identicalIds(), notes.conflictIds(), notes.repeatedIdenticalIds()));
+	}
+
+	private FocusBackupClassification classifyFocusSessions(DecodedBackup decoded,
+			List<com.github.cleytonorocha.hub.dto.FocusSessionDtos.SessionView> existingSessions, String activeId) {
+		Map<String, com.github.cleytonorocha.hub.dto.FocusSessionDtos.SessionView> localById = new LinkedHashMap<>();
+		for (var existing : existingSessions) localById.put(existing.id(), existing);
+		List<BackupFocusSession> newSessions = new ArrayList<>();
+		List<String> identicalIds = new ArrayList<>();
+		Set<String> conflicts = new LinkedHashSet<>(decoded.internalFocusConflicts());
+		for (BackupFocusSession incoming : decoded.uniqueFocusSessions().values()) {
+			if (conflicts.contains(incoming.id())) continue;
+			var local = localById.get(incoming.id());
+			if (local == null) newSessions.add(incoming);
+			else if (("ENDED".equals(local.state()) && "ENDED".equals(incoming.state())
+					|| "PAUSED".equals(local.state()) && "PAUSED".equals(incoming.state()))
+					&& samePersistedFocusSession(local, incoming)) identicalIds.add(incoming.id());
+			else if (isCurrentActiveSnapshot(local, incoming)) identicalIds.add(incoming.id());
+			else conflicts.add(incoming.id());
+		}
+		boolean hasNewOpenSession = newSessions.stream().anyMatch(item -> !"ENDED".equals(item.state()));
+		boolean slotConflict = hasNewOpenSession && activeId != null;
+		return new FocusBackupClassification(newSessions, identicalIds, conflicts.stream().sorted().toList(),
+			decoded.repeatedIdenticalFocusIds(), slotConflict);
+	}
+
+	private boolean samePersistedFocusSession(com.github.cleytonorocha.hub.dto.FocusSessionDtos.SessionView local,
+			BackupFocusSession incoming) {
+		return local.id().equals(incoming.id()) && local.objective().equals(incoming.objective())
+			&& local.plannedSeconds() == incoming.plannedSeconds() && local.focusedSeconds() == incoming.focusedSeconds()
+			&& local.state().equals(incoming.state()) && java.util.Objects.equals(local.startedAt(), incoming.startedAt())
+			&& java.util.Objects.equals(local.resumedAt(), incoming.resumedAt())
+			&& java.util.Objects.equals(local.pausedAt(), incoming.pausedAt())
+			&& java.util.Objects.equals(local.endedAt(), incoming.endedAt())
+			&& java.util.Objects.equals(local.endReason(), incoming.endReason())
+			&& java.util.Objects.equals(local.taskId(), incoming.taskId());
+	}
+
+	private boolean isCurrentActiveSnapshot(com.github.cleytonorocha.hub.dto.FocusSessionDtos.SessionView local,
+			BackupFocusSession incoming) {
+		if (!"ACTIVE".equals(local.state()) || !"PAUSED".equals(incoming.state()) || local.resumedAt() == null
+				|| incoming.pausedAt() == null || incoming.resumedAt() != null || incoming.endedAt() != null || incoming.endReason() != null
+				|| !local.id().equals(incoming.id()) || !local.objective().equals(incoming.objective())
+				|| local.plannedSeconds() != incoming.plannedSeconds()
+				|| !java.util.Objects.equals(local.taskId(), incoming.taskId())
+				|| !java.util.Objects.equals(local.startedAt(), incoming.startedAt())
+				|| incoming.pausedAt().isBefore(local.resumedAt())) return false;
+		long elapsed = Math.max(0, java.time.Duration.between(local.resumedAt(), incoming.pausedAt()).getSeconds());
+		return (long) local.focusedSeconds() + elapsed == incoming.focusedSeconds();
+	}
+
+	private String currentActiveId() {
+		var active = focusSessions.active(AuthContext.userId());
+		return active == null ? null : active.id();
+	}
+
+	private void requireTaskImportPermission(DecodedBackup decoded) {
+		if ((!decoded.file().tasks().isEmpty() || (decoded.file().series() != null && !decoded.file().series().isEmpty()))
+				&& !AuthContext.hasPermission("TASK_WRITE"))
+			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Seu perfil não pode importar tarefas.");
+	}
+
+	private void requireReadingImportPermission(DecodedBackup decoded) {
+		if ((!decoded.file().readingItems().isEmpty() || (decoded.file().authors() != null && !decoded.file().authors().isEmpty()))
+				&& !AuthContext.hasPermission("READING_WRITE"))
+			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Seu perfil não pode importar itens de leitura.");
+	}
+
+	private void requireFocusImportPermission(DecodedBackup decoded) {
+		if (!decoded.file().focusSessions().isEmpty()) {
+			if (!AuthContext.hasPermission("FOCUS_WRITE"))
+				throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Seu perfil não pode importar sessões de foco.");
+			if (decoded.file().focusSessions().stream().anyMatch(session -> session.taskId() != null) && !AuthContext.hasPermission("TASK_READ"))
+				throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Seu perfil não pode verificar os vínculos de tarefas das sessões de foco.");
+		}
+	}
+
+	private void requireHabitImportPermission(DecodedBackup decoded) {
+		if (!decoded.file().habits().isEmpty() && !AuthContext.hasPermission("HABITS_WRITE"))
+			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Seu perfil não pode importar hábitos.");
+	}
+
+	private void requireNoteImportPermission(DecodedBackup decoded) {
+		if (!decoded.file().notes().isEmpty()) {
+			if (!AuthContext.hasPermission("NOTES_WRITE")) throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Seu perfil não pode importar notas.");
+			if (decoded.file().notes().stream().anyMatch(note -> note.relatedTaskId() != null) && !AuthContext.hasPermission("TASK_READ"))
+				throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Seu perfil não pode verificar os vínculos de tarefas das notas.");
+		}
 	}
 
 	private TaskBackupClassification classifyTasks(DecodedBackup decoded, List<Task> localTasks) {
@@ -343,7 +577,8 @@ public class TaskBackupService {
 
 	private ReadingBackupClassification classifyReadingItems(DecodedBackup decoded, List<ReadingItem> existingItems) {
 		Map<String, BackupReadingItem> localById = new LinkedHashMap<>();
-		for (ReadingItem item : existingItems) localById.put(item.getId(), toBackupReadingItem(item, true));
+		String ownerId = AuthContext.userId();
+		for (ReadingItem item : existingItems) localById.put(item.getId(), toBackupReadingItem(item, true, ownerId));
 		List<BackupReadingItem> newItems = new ArrayList<>();
 		List<String> identicalIds = new ArrayList<>();
 		Set<String> conflicts = new LinkedHashSet<>(decoded.internalReadingConflicts());
@@ -369,6 +604,62 @@ public class TaskBackupService {
 			else conflicts.add(incoming.id());
 		}
 		return new ReadingBackupClassification(newItems, identicalIds, conflicts.stream().sorted().toList(), decoded.repeatedIdenticalReadingIds());
+	}
+
+	private HabitBackupClassification classifyHabits(DecodedBackup decoded, List<Habit> existingHabits) {
+		Map<String, BackupHabit> localById = new LinkedHashMap<>();
+		for (BackupHabit habit : toBackupHabits(existingHabits)) localById.put(habit.id(), habit);
+		List<BackupHabit> newHabits = new ArrayList<>();
+		List<String> identicalIds = new ArrayList<>();
+		Set<String> conflicts = new LinkedHashSet<>(decoded.internalHabitConflicts());
+		for (BackupHabit incoming : decoded.uniqueHabits().values()) {
+			if (conflicts.contains(incoming.id())) continue;
+			BackupHabit local = localById.get(incoming.id());
+			if (local == null) newHabits.add(incoming);
+			else if (local.equals(incoming)) identicalIds.add(incoming.id());
+			else conflicts.add(incoming.id());
+		}
+		return new HabitBackupClassification(newHabits, identicalIds, conflicts.stream().sorted().toList(), decoded.repeatedIdenticalHabitIds());
+	}
+
+	private NoteBackupClassification classifyNotes(DecodedBackup decoded, TaskBackupClassification taskClassification, List<Note> existingNotes) {
+		Set<String> importableTaskIds = new LinkedHashSet<>();
+		importableTaskIds.addAll(tasks.findAll().stream().map(Task::getId).toList());
+		importableTaskIds.addAll(taskClassification.newTasks().stream().map(BackupTask::id).toList());
+		Map<String, BackupNote> localById = new LinkedHashMap<>();
+		for (Note note : existingNotes) localById.put(note.getId(), toBackupNote(note, importableTaskIds));
+		List<BackupNote> newNotes = new ArrayList<>();
+		List<String> identicalIds = new ArrayList<>();
+		Set<String> conflicts = new LinkedHashSet<>(decoded.internalNoteConflicts());
+		for (BackupNote raw : decoded.uniqueNotes().values()) {
+			if (conflicts.contains(raw.id())) continue;
+			BackupNote incoming = normalizeNoteLink(raw, importableTaskIds);
+			BackupNote local = localById.get(incoming.id());
+			if (local == null) newNotes.add(incoming);
+			else if (local.equals(incoming)) identicalIds.add(incoming.id());
+			else conflicts.add(incoming.id());
+		}
+		return new NoteBackupClassification(newNotes, identicalIds, conflicts.stream().sorted().toList(), decoded.repeatedIdenticalNoteIds());
+	}
+
+	private List<BackupNote> exportNotes(List<Task> localTasks) {
+		List<Note> source = noteService.loadForBackup();
+		if (source.size() > MAX_NOTES) throw tooLarge("A cópia excede o limite de 5.000 notas.");
+		Set<String> taskIds = localTasks.stream().map(Task::getId).collect(java.util.stream.Collectors.toSet());
+		return source.stream().map(note -> toBackupNote(note, taskIds)).toList();
+	}
+
+	private BackupNote toBackupNote(Note note, Set<String> taskIdsInCopy) {
+		String taskId = note.getRelatedTaskId();
+		boolean unavailable = taskId != null && (taskIdsInCopy == null || !taskIdsInCopy.contains(taskId));
+		return new BackupNote(note.getId(), note.getTitle(), note.getBody(), note.getTags(), note.isPinned(), note.isArchived(), taskId, unavailable,
+			note.getCreatedAt().truncatedTo(ChronoUnit.MICROS), note.getUpdatedAt().truncatedTo(ChronoUnit.MICROS));
+	}
+
+	private BackupNote normalizeNoteLink(BackupNote note, Set<String> importableTaskIds) {
+		boolean unavailable = note.relatedTaskId() != null && !importableTaskIds.contains(note.relatedTaskId());
+		return new BackupNote(note.id(), note.title(), note.body(), note.tags(), note.pinned(), note.archived(), note.relatedTaskId(), unavailable,
+			note.createdAt(), note.updatedAt());
 	}
 
 	private boolean sameReadingItem(BackupReadingItem left, BackupReadingItem right, boolean compareCover, boolean compareAuthors) {
@@ -428,7 +719,7 @@ public class TaskBackupService {
 					String name = entry.getName();
 					if (name.equals("manifest.json")) {
 						if (manifest != null) throw invalid("O pacote repete o manifesto.");
-						manifest = readEntry(zip, entry, MAX_FILE_BYTES);
+						manifest = readEntry(zip, entry, MAX_MANIFEST_BYTES);
 						expanded += manifest.length;
 					} else if (name.matches("assets/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.(jpg|png)")) {
 						if (entries.containsKey(name)) throw invalid("O pacote repete um arquivo de imagem.");
@@ -457,7 +748,7 @@ public class TaskBackupService {
 
 	private DecodedBackup decodeJson(byte[] content, boolean packaged, Map<String, Path> archiveEntries, Path staging, String wholeDigest) {
 		if (content == null || content.length == 0) throw invalid("O arquivo está vazio.");
-		if (content.length > MAX_FILE_BYTES) throw tooLarge("O arquivo excede o limite de 5 MiB.");
+		if (content.length > (packaged ? MAX_MANIFEST_BYTES : MAX_FILE_BYTES)) throw tooLarge(packaged ? "O manifesto da cópia excede o limite de 90 MiB." : "O arquivo excede o limite de 5 MiB.");
 		try {
 			TokenStreamFactory strictFactory = mapper.tokenStreamFactory().rebuild()
 				.enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
@@ -469,8 +760,11 @@ public class TaskBackupService {
 			if (root == null || !root.isObject() || !root.has("formatVersion") || !root.get("formatVersion").isIntegralNumber()) throw invalid("O arquivo não tem a estrutura esperada da cópia do Hub.");
 			int inputVersion = root.get("formatVersion").intValue();
 			if (inputVersion < 1 || inputVersion > (packaged ? FORMAT_VERSION : LEGACY_FORMAT_VERSION)) throw invalid("Esta versão da cópia não é compatível.");
-			if (packaged && inputVersion < 5) throw invalid("O pacote ZIP precisa usar a versão 5, 6 ou 7.");
-			Set<String> expectedRootFields = inputVersion == 1 ? ROOT_FIELDS_V1 : inputVersion <= 3 ? ROOT_FIELDS_V2_V3 : inputVersion == 4 ? ROOT_FIELDS_V4 : inputVersion >= 7 ? ROOT_FIELDS_V7 : ROOT_FIELDS_V5;
+			if (packaged && inputVersion < 5) throw invalid("O pacote ZIP precisa usar a versão 5 ou posterior.");
+			Set<String> expectedRootFields = inputVersion == 1 ? ROOT_FIELDS_V1 : inputVersion <= 3 ? ROOT_FIELDS_V2_V3
+						: inputVersion == 4 ? ROOT_FIELDS_V4 : inputVersion == 8 ? ROOT_FIELDS_V8 : inputVersion == 9 ? ROOT_FIELDS_V9
+						: inputVersion == 10 ? ROOT_FIELDS_V10 : inputVersion == 11 ? ROOT_FIELDS_V11
+				: inputVersion >= 7 ? ROOT_FIELDS_V7 : ROOT_FIELDS_V5;
 			if (!fieldNames(root).equals(expectedRootFields)) throw invalid("O arquivo não tem a estrutura esperada da cópia do Hub.");
 			if (!root.get("generatedAt").isTextual()) throw invalid("A versão ou a data da cópia está inválida.");
 			JsonNode taskNodes = root.get("tasks");
@@ -537,10 +831,64 @@ public class TaskBackupService {
 				for (JsonNode author : authorNodes) if (!author.isObject() || !fieldNames(author).equals(Set.of("id", "name"))
 					|| !author.has("id") || !author.get("id").isTextual() || !author.has("name") || !author.get("name").isTextual()) throw invalid("Um autor do arquivo tem campos inválidos.");
 			}
+			if (inputVersion >= 8) {
+				JsonNode habitNodes = root.get("habits");
+				if (habitNodes == null || !habitNodes.isArray() || habitNodes.size() > MAX_HABITS) throw tooLarge("A lista excede o limite de 5.000 hábitos.");
+				for (JsonNode node : habitNodes) {
+					if (!node.isObject() || !fieldNames(node).equals(HABIT_FIELDS)
+						|| !node.get("id").isTextual() || !node.get("name").isTextual() || !isTextOrNull(node.get("startDate"))
+						|| !node.get("createdAt").isTextual() || !node.get("updatedAt").isTextual()
+						|| !node.get("schedules").isArray() || !node.get("pauses").isArray() || !node.get("checkIns").isArray()) throw invalid("Um hábito da cópia está inválido.");
+					for (JsonNode schedule : node.get("schedules")) if (!schedule.isObject() || !fieldNames(schedule).equals(HABIT_SCHEDULE_FIELDS)
+						|| !isTextOrNull(schedule.get("effectiveFrom")) || !schedule.get("weekdaysMask").isIntegralNumber()) throw invalid("Uma agenda de hábito da cópia está inválida.");
+					for (JsonNode pause : node.get("pauses")) if (!pause.isObject() || !fieldNames(pause).equals(HABIT_PAUSE_FIELDS)
+						|| !isTextOrNull(pause.get("pausedOn")) || !isTextOrNull(pause.get("resumedOn"))) throw invalid("Uma pausa de hábito da cópia está inválida.");
+					for (JsonNode checkIn : node.get("checkIns")) if (!checkIn.isTextual()) throw invalid("Um registro de hábito da cópia está inválido.");
+				}
+			}
+			if (inputVersion >= 9) {
+				JsonNode focusNodes = root.get("focusSessions");
+				if (focusNodes == null || !focusNodes.isArray() || focusNodes.size() > MAX_FOCUS_SESSIONS) throw tooLarge("A cópia excede o limite de 50.000 sessões de foco.");
+				for (JsonNode node : focusNodes) {
+					if (!node.isObject() || !fieldNames(node).equals(FOCUS_SESSION_FIELDS)
+						|| !node.get("id").isTextual() || !node.get("objective").isTextual()
+						|| !node.get("plannedSeconds").isIntegralNumber() || !node.get("focusedSeconds").isIntegralNumber()
+						|| !node.get("state").isTextual() || !isTextOrNull(node.get("startedAt"))
+						|| !isTextOrNull(node.get("resumedAt")) || !isTextOrNull(node.get("pausedAt"))
+						|| !isTextOrNull(node.get("endedAt")) || !isTextOrNull(node.get("endReason")) || !isTextOrNull(node.get("taskId")))
+						throw invalid("Uma sessão de foco da cópia está inválida.");
+				}
+			}
+			if (inputVersion >= 10) {
+				JsonNode noteNodes = root.get("notes");
+				if (noteNodes == null || !noteNodes.isArray() || noteNodes.size() > MAX_NOTES) throw tooLarge("A cópia excede o limite de 5.000 notas.");
+				for (JsonNode node : noteNodes) {
+					if (!node.isObject() || !fieldNames(node).equals(NOTE_FIELDS)
+						|| !node.get("id").isTextual() || !node.get("title").isTextual() || !node.get("body").isTextual()
+						|| !node.get("tags").isArray() || !node.get("pinned").isBoolean() || !node.get("archived").isBoolean()
+						|| !isTextOrNull(node.get("relatedTaskId")) || !node.get("relatedTaskUnavailable").isBoolean()
+						|| !node.get("createdAt").isTextual() || !node.get("updatedAt").isTextual()) throw invalid("Uma nota da cópia está inválida.");
+					if (node.get("tags").size() > NoteService.MAX_TAGS) throw invalid("Uma nota excede o limite de etiquetas.");
+					for (JsonNode tag : node.get("tags")) if (!tag.isTextual()) throw invalid("Uma etiqueta da nota é inválida.");
+				}
+			}
+			if (inputVersion >= 11) {
+				JsonNode omitted = root.get("omittedSections");
+				if (omitted == null || !omitted.isArray() || omitted.size() > OMITTABLE_SECTIONS.size()) throw invalid("A lista de áreas omitidas é inválida.");
+				Set<String> unique = new LinkedHashSet<>();
+				for (JsonNode section : omitted) {
+					if (!section.isTextual() || !OMITTABLE_SECTIONS.contains(section.asText()) || !unique.add(section.asText()))
+						throw invalid("A lista de áreas omitidas contém um valor inválido ou repetido.");
+				}
+			}
 			BackupFile file = mapper.treeToValue(root, BackupFile.class);
-			if (inputVersion < 4) file = new BackupFile(file.formatVersion(), file.generatedAt(), file.tasks(), file.series(), List.of(), List.of());
+			if (inputVersion < 4) file = new BackupFile(file.formatVersion(), file.generatedAt(), file.tasks(), file.series(), List.of(), List.of(), List.of());
 			validateFile(file);
-			file = new BackupFile(file.formatVersion(), file.generatedAt(), file.tasks(), file.series(), normalizeReadingItems(file.readingItems(), inputVersion), inputVersion >= 7 ? file.authors() : List.of());
+			file = new BackupFile(file.formatVersion(), file.generatedAt(), file.tasks(), file.series(), normalizeReadingItems(file.readingItems(), inputVersion),
+				inputVersion >= 7 ? file.authors() : List.of(), inputVersion >= 8 ? normalizeHabits(file.habits()) : List.of(),
+				inputVersion >= 9 ? normalizeFocusSessions(file.focusSessions(), file.generatedAt()) : List.of(),
+				inputVersion >= 10 ? normalizeNotes(file.notes()) : List.of(),
+				inputVersion >= 11 ? file.omittedSections() : List.of());
 			Map<String, BackupTask> unique = new LinkedHashMap<>();
 			Set<String> internalConflicts = new LinkedHashSet<>();
 			int repeatedIdenticalIds = 0;
@@ -564,8 +912,42 @@ public class TaskBackupService {
 				}
 			}
 			Map<String, Path> coverAssets = validateAndMapAssets(file, inputVersion, archiveEntries);
+			Map<String, BackupHabit> uniqueHabits = new LinkedHashMap<>();
+			Set<String> internalHabitConflicts = new LinkedHashSet<>();
+			int repeatedIdenticalHabitIds = 0;
+			for (BackupHabit habit : file.habits()) {
+				BackupHabit previous = uniqueHabits.putIfAbsent(habit.id(), habit);
+				if (previous != null) {
+					if (previous.equals(habit)) repeatedIdenticalHabitIds++;
+					else internalHabitConflicts.add(habit.id());
+				}
+			}
+			Map<String, BackupFocusSession> uniqueFocus = new LinkedHashMap<>();
+			Set<String> internalFocusConflicts = new LinkedHashSet<>();
+			int repeatedIdenticalFocusIds = 0;
+			for (BackupFocusSession session : file.focusSessions()) {
+				BackupFocusSession previous = uniqueFocus.putIfAbsent(session.id(), session);
+				if (previous != null) {
+					if (previous.equals(session)) repeatedIdenticalFocusIds++;
+					else internalFocusConflicts.add(session.id());
+				}
+			}
+			if (uniqueFocus.values().stream().filter(session -> !"ENDED".equals(session.state())).count() > 1)
+				throw invalid("A cópia não pode conter mais de uma sessão ativa ou pausada.");
+			Map<String, BackupNote> uniqueNotes = new LinkedHashMap<>();
+			Set<String> internalNoteConflicts = new LinkedHashSet<>();
+			int repeatedIdenticalNoteIds = 0;
+			for (BackupNote note : file.notes()) {
+				BackupNote previous = uniqueNotes.putIfAbsent(note.id(), note);
+				if (previous != null) {
+					if (previous.equals(note)) repeatedIdenticalNoteIds++;
+					else internalNoteConflicts.add(note.id());
+				}
+			}
 			return new DecodedBackup(file, wholeDigest, unique, internalConflicts, repeatedIdenticalIds,
-				uniqueReadingItems, internalReadingConflicts, repeatedIdenticalReadingIds, coverAssets, staging);
+				uniqueReadingItems, internalReadingConflicts, repeatedIdenticalReadingIds, uniqueHabits, internalHabitConflicts,
+				repeatedIdenticalHabitIds, uniqueFocus, internalFocusConflicts, repeatedIdenticalFocusIds, uniqueNotes, internalNoteConflicts,
+				repeatedIdenticalNoteIds, coverAssets, staging);
 		} catch (ResponseStatusException error) {
 			throw error;
 		} catch (Exception error) {
@@ -616,6 +998,140 @@ public class TaskBackupService {
 				if (item.coverSourceUrl() != null && item.coverSha256() == null) throw invalid("A origem da capa exige uma imagem no pacote.");
 			}
 		}
+		if (file.formatVersion() >= 8) {
+			if (file.habits() == null || file.habits().size() > MAX_HABITS) throw tooLarge("A cópia excede o limite de 5.000 hábitos.");
+			Set<String> ids = new LinkedHashSet<>();
+			for (BackupHabit habit : file.habits()) {
+				validateHabit(habit);
+				if (!ids.add(habit.id())) throw invalid("O arquivo repete um hábito.");
+			}
+		}
+		if (file.formatVersion() >= 9) {
+			if (file.focusSessions() == null || file.focusSessions().size() > MAX_FOCUS_SESSIONS) throw tooLarge("A cópia excede o limite de 50.000 sessões de foco.");
+			Set<String> ids = new LinkedHashSet<>();
+			int openSessions = 0;
+			for (BackupFocusSession session : file.focusSessions()) {
+				validateFocusSession(session, file.generatedAt());
+				if (!ids.add(session.id())) throw invalid("O arquivo repete uma sessão de foco.");
+				if (!"ENDED".equals(session.state())) openSessions++;
+			}
+			if (openSessions > 1) throw invalid("A cópia não pode conter mais de uma sessão ativa ou pausada.");
+		}
+		if (file.formatVersion() >= 10) {
+			if (file.notes() == null || file.notes().size() > MAX_NOTES) throw tooLarge("A cópia excede o limite de 5.000 notas.");
+			Set<String> ids = new LinkedHashSet<>();
+			for (BackupNote note : file.notes()) {
+				validateNote(note, file.generatedAt());
+				if (!ids.add(note.id())) throw invalid("O arquivo repete uma nota.");
+			}
+		}
+		if (file.formatVersion() >= 11) {
+			if (file.omittedSections() == null || file.omittedSections().size() > OMITTABLE_SECTIONS.size()
+					|| new LinkedHashSet<>(file.omittedSections()).size() != file.omittedSections().size()
+					|| !OMITTABLE_SECTIONS.containsAll(file.omittedSections())) throw invalid("A lista de áreas omitidas é inválida.");
+			for (String section : file.omittedSections()) {
+				boolean containsData = switch (section) {
+					case "habits" -> !file.habits().isEmpty();
+					case "focusSessions" -> !file.focusSessions().isEmpty();
+					case "notes" -> !file.notes().isEmpty();
+					default -> true;
+				};
+				if (containsData) throw invalid("Uma área marcada como omitida contém registros.");
+			}
+		}
+	}
+
+	private void validateNote(BackupNote note, Instant generatedAt) {
+		try { if (note == null || note.id() == null || !UUID.fromString(note.id()).toString().equals(note.id())) throw invalid("O arquivo contém um identificador de nota inválido."); }
+		catch (RuntimeException error) { throw invalid("O arquivo contém um identificador de nota inválido."); }
+		if (note.title() == null || note.title().isBlank() || note.title().strip().length() > NoteService.MAX_TITLE_LENGTH
+				|| note.body() == null || note.body().length() > NoteService.MAX_BODY_LENGTH || note.tags() == null
+				|| note.tags().size() > NoteService.MAX_TAGS || note.createdAt() == null || note.updatedAt() == null
+				|| note.createdAt().isAfter(generatedAt) || note.updatedAt().isBefore(note.createdAt()) || note.updatedAt().isAfter(generatedAt)) throw invalid("A cópia contém dados de nota inválidos.");
+		Set<String> tags = new LinkedHashSet<>();
+		for (String tag : note.tags()) {
+			if (tag == null || tag.isBlank() || tag.strip().length() > NoteService.MAX_TAG_LENGTH
+					|| !tags.add(TaskSearchNormalization.normalize(tag.strip()).toLowerCase(java.util.Locale.forLanguageTag("pt-BR"))))
+				throw invalid("A cópia contém etiquetas de nota inválidas ou repetidas.");
+		}
+		if (note.relatedTaskId() != null) {
+			try { if (!UUID.fromString(note.relatedTaskId()).toString().equals(note.relatedTaskId())) throw invalid("O vínculo de tarefa de uma nota é inválido."); }
+			catch (RuntimeException error) { throw invalid("O vínculo de tarefa de uma nota é inválido."); }
+		} else if (note.relatedTaskUnavailable()) throw invalid("Uma nota sem tarefa não pode marcar o vínculo como indisponível.");
+	}
+
+	private void validateFocusSession(BackupFocusSession session, Instant generatedAt) {
+		try { if (session == null || session.id() == null || !UUID.fromString(session.id()).toString().equals(session.id())) throw invalid("O arquivo contém um identificador de sessão inválido."); }
+		catch (RuntimeException error) { throw invalid("O arquivo contém um identificador de sessão inválido."); }
+		if (session.objective() == null || session.objective().isBlank() || session.objective().strip().length() > 240
+				|| session.plannedSeconds() < 60 || session.plannedSeconds() > 43_200 || session.focusedSeconds() < 0
+				|| session.startedAt() == null || generatedAt == null || session.startedAt().isAfter(generatedAt))
+			throw invalid("A cópia contém dados de sessão inválidos.");
+		if (session.taskId() != null) {
+			try { if (!UUID.fromString(session.taskId()).toString().equals(session.taskId())) throw invalid("O vínculo de tarefa da sessão é inválido."); }
+			catch (RuntimeException error) { throw invalid("O vínculo de tarefa da sessão é inválido."); }
+		}
+		if ("ACTIVE".equals(session.state())) {
+			if (session.resumedAt() == null || session.resumedAt().isBefore(session.startedAt()) || session.resumedAt().isAfter(generatedAt)
+					|| session.endedAt() != null || session.endReason() != null) throw invalid("O estado ativo da sessão na cópia é inválido.");
+		} else if ("PAUSED".equals(session.state())) {
+			if (session.resumedAt() != null || session.pausedAt() == null || session.pausedAt().isBefore(session.startedAt())
+					|| session.pausedAt().isAfter(generatedAt) || session.endedAt() != null || session.endReason() != null)
+				throw invalid("O estado pausado da sessão na cópia é inválido.");
+		} else if ("ENDED".equals(session.state())) {
+			if (session.resumedAt() != null || session.endedAt() == null || session.endedAt().isBefore(session.startedAt())
+				|| session.endedAt().isAfter(generatedAt) || session.endReason() == null || !Set.of("NORMAL", "EARLY", "ADJUSTED").contains(session.endReason()))
+				throw invalid("O encerramento da sessão na cópia é inválido.");
+		} else throw invalid("O estado da sessão na cópia é inválido.");
+	}
+
+	private List<BackupFocusSession> normalizeFocusSessions(List<BackupFocusSession> sessions, Instant generatedAt) {
+		if (sessions == null) return List.of();
+		return sessions.stream().map(session -> {
+			if (!"ACTIVE".equals(session.state())) return session;
+			long extra = java.time.Duration.between(session.resumedAt(), generatedAt).getSeconds();
+			long focused = Math.addExact((long) session.focusedSeconds(), Math.max(0, extra));
+			if (focused > Integer.MAX_VALUE) throw invalid("O tempo registrado da sessão excede o limite suportado.");
+			return new BackupFocusSession(session.id(), session.objective(), session.plannedSeconds(), (int) focused,
+				"PAUSED", session.startedAt(), null, generatedAt, null, null, session.taskId());
+		}).toList();
+	}
+
+	private void validateHabit(BackupHabit habit) {
+		try { if (habit == null || habit.id() == null || !UUID.fromString(habit.id()).toString().equals(habit.id())) throw invalid("O arquivo contém um identificador de hábito inválido."); }
+		catch (RuntimeException error) { throw invalid("O arquivo contém um identificador de hábito inválido."); }
+		if (habit.name() == null || habit.name().isBlank() || habit.name().strip().length() > 120 || habit.startDate() == null
+				|| habit.createdAt() == null || habit.updatedAt() == null || habit.updatedAt().isBefore(habit.createdAt())) throw invalid("O arquivo contém dados de hábito inválidos.");
+		if (habit.schedules() == null || habit.schedules().isEmpty() || habit.schedules().size() > 10_000
+				|| habit.pauses() == null || habit.pauses().size() > 10_000 || habit.checkIns() == null || habit.checkIns().size() > 100_000)
+			throw invalid("O arquivo contém histórico de hábito inválido ou longo demais.");
+		LocalDate previousSchedule = null;
+		for (BackupHabitSchedule schedule : habit.schedules()) {
+			if (schedule.effectiveFrom() == null || schedule.effectiveFrom().isBefore(habit.startDate())
+					|| schedule.weekdaysMask() < 1 || schedule.weekdaysMask() > 127
+					|| (previousSchedule != null && !schedule.effectiveFrom().isAfter(previousSchedule))) throw invalid("O arquivo contém uma agenda de hábito inválida.");
+			previousSchedule = schedule.effectiveFrom();
+		}
+		LocalDate previousPauseEnd = null;
+		for (BackupHabitPause pause : habit.pauses()) {
+			if (pause.pausedOn() == null || (pause.resumedOn() != null && pause.resumedOn().isBefore(pause.pausedOn()))
+					|| (previousPauseEnd != null && pause.pausedOn().isBefore(previousPauseEnd))) throw invalid("O arquivo contém um intervalo de pausa inválido.");
+			if (pause.resumedOn() == null && pause != habit.pauses().getLast()) throw invalid("O arquivo contém mais de uma pausa ativa.");
+			previousPauseEnd = pause.resumedOn();
+		}
+		Set<LocalDate> checkIns = new LinkedHashSet<>();
+		for (LocalDate date : habit.checkIns()) {
+			if (date == null || !checkIns.add(date)) throw invalid("O arquivo repete um registro de hábito.");
+			if (date.isBefore(habit.startDate())) throw invalid("O arquivo contém um registro anterior ao início do hábito.");
+			BackupHabitSchedule effectiveSchedule = habit.schedules().stream()
+				.filter(schedule -> !schedule.effectiveFrom().isAfter(date))
+				.max(java.util.Comparator.comparing(BackupHabitSchedule::effectiveFrom)).orElse(null);
+			if (effectiveSchedule == null || (effectiveSchedule.weekdaysMask() & (1 << (date.getDayOfWeek().getValue() - 1))) == 0)
+				throw invalid("O arquivo contém um registro em um dia que não estava previsto.");
+			boolean paused = habit.pauses().stream().anyMatch(pause -> !date.isBefore(pause.pausedOn())
+				&& (pause.resumedOn() == null || date.isBefore(pause.resumedOn())) && !date.equals(pause.pausedOn()));
+			if (paused) throw invalid("O arquivo contém um registro durante uma pausa do hábito.");
+		}
 	}
 
 	private void validateReadingItem(BackupReadingItem item) {
@@ -651,10 +1167,28 @@ public class TaskBackupService {
 		Integer currentPage = version >= 6 && totalPages != null ? (item.currentPage() == null ? 0 : item.currentPage()) : null;
 		return new BackupReadingItem(item.id(), item.title(), item.type(), item.authorOrSource(), item.url(), item.status(),
 			item.progressMarker(), totalPages, currentPage,
-			item.note(), tags, item.archived(), item.createdAt(), item.updatedAt(),
+			item.note(), tags, item.archived(), item.createdAt().truncatedTo(ChronoUnit.MICROS), item.updatedAt().truncatedTo(ChronoUnit.MICROS),
 			version >= 5 ? item.coverSha256() : null, version >= 5 ? item.coverFormat() : null,
 			version >= 5 ? item.coverSize() : null, version >= 7 ? item.coverSourceUrl() : null,
 			version >= 7 && item.authorIds() != null ? item.authorIds() : List.of());
+	}
+
+	private List<BackupHabit> normalizeHabits(List<BackupHabit> habits) {
+		return (habits == null ? List.<BackupHabit>of() : habits).stream().map(item -> new BackupHabit(item.id(), item.name().strip(),
+			item.startDate(), item.createdAt().truncatedTo(ChronoUnit.MICROS), item.updatedAt().truncatedTo(ChronoUnit.MICROS),
+			item.schedules().stream().sorted(java.util.Comparator.comparing(BackupHabitSchedule::effectiveFrom)).toList(),
+			item.pauses().stream().sorted(java.util.Comparator.comparing(BackupHabitPause::pausedOn)).toList(),
+			item.checkIns().stream().sorted().toList())).toList();
+	}
+
+	private List<BackupNote> normalizeNotes(List<BackupNote> notes) {
+		return (notes == null ? List.<BackupNote>of() : notes).stream().map(note -> {
+			List<String> cleanTags = new ArrayList<>();
+			Set<String> seen = new LinkedHashSet<>();
+			for (String tag : note.tags()) if (seen.add(TaskSearchNormalization.normalize(tag.strip()).toLowerCase(java.util.Locale.forLanguageTag("pt-BR")))) cleanTags.add(tag.strip());
+			return new BackupNote(note.id(), note.title().strip(), note.body(), cleanTags, note.pinned(), note.archived(), note.relatedTaskId(), note.relatedTaskUnavailable(),
+				note.createdAt().truncatedTo(ChronoUnit.MICROS), note.updatedAt().truncatedTo(ChronoUnit.MICROS));
+		}).toList();
 	}
 
 	private void validateBackupUrl(String value) {
@@ -728,23 +1262,67 @@ public class TaskBackupService {
 			task.getType().name(), task.getCategory(), task.getColor(), task.getPriority(), task.getNotes(), task.getSeriesId(), task.getSeriesPosition(), checklists.exportItems(task.getId()));
 	}
 
+	private BackupFocusSession toBackupFocusSession(com.github.cleytonorocha.hub.dto.FocusSessionDtos.SessionView session, Instant snapshotAt) {
+		String state = session.state();
+		int focusedSeconds = session.focusedSeconds();
+		Instant resumedAt = session.resumedAt();
+		Instant pausedAt = session.pausedAt();
+		if ("ACTIVE".equals(state)) {
+			long elapsed = Math.max(0, java.time.Duration.between(resumedAt, snapshotAt).getSeconds());
+			long total = (long) focusedSeconds + elapsed;
+			focusedSeconds = (int) Math.min(Integer.MAX_VALUE, total);
+			state = "PAUSED";
+			resumedAt = null;
+			pausedAt = snapshotAt;
+		}
+		return new BackupFocusSession(session.id(), session.objective(), session.plannedSeconds(), focusedSeconds, state,
+			session.startedAt(), resumedAt, pausedAt, session.endedAt(), session.endReason(), session.taskId());
+	}
+
 	private BackupSeries toBackupSeries(TaskSeries item) {
 		return new BackupSeries(item.getId(), item.getTitle(), item.getStartDate(), item.getDueTime(), item.getOccurrenceCount(), item.getTimeZoneId(), item.isEnded());
 	}
 
-	private BackupReadingItem toBackupReadingItem(ReadingItem item, boolean includeCover) {
+	private BackupReadingItem toBackupReadingItem(ReadingItem item, boolean includeCover, String ownerId) {
 		String coverSha256 = includeCover ? item.getCoverImageSha256() : null;
 		if (includeCover && ((item.getCoverImageName() == null) != (coverSha256 == null))) throw new IllegalStateException("A referência e o hash da imagem de capa estão inconsistentes.");
 		String coverFormat = includeCover && item.getCoverImageName() != null ? item.getCoverImageName().substring(item.getCoverImageName().lastIndexOf('.') + 1) : null;
 		Long coverSize = null;
 		if (includeCover && item.getCoverImageName() != null) {
-			try { coverSize = covers.size(item.getCoverImageName()); }
+			try { coverSize = covers.size(ownerId, item.getCoverImageName()); }
 			catch (IOException error) { throw new IllegalStateException("Uma imagem de capa não está disponível.", error); }
 			if (coverSha256 == null || !coverSha256.matches("[0-9a-f]{64}")) throw new IllegalStateException("O hash da imagem de capa está inválido.");
 		}
 		return new BackupReadingItem(item.getId(), item.getTitle(), item.getType(), item.getAuthorOrSource(), item.getUrl(),
 			item.getStatus(), item.getProgressMarker(), item.getTotalPages(), item.getCurrentPage(), item.getNote(), item.getTags(), item.isArchived(), item.getCreatedAt(), item.getUpdatedAt(),
 			coverSha256, coverFormat, coverSize, item.getCoverSourceUrl(), item.getAuthors().stream().map(ReadingAuthor::getId).sorted().toList());
+	}
+
+	private List<BackupHabit> exportHabits() {
+		List<Habit> local = habits.findAllByOrderByStartDateAscCreatedAtAsc();
+		if (local.size() > MAX_HABITS) throw tooLarge("A cópia excede o limite de 5.000 hábitos.");
+		return toBackupHabits(local);
+	}
+
+	private List<BackupHabit> toBackupHabits(List<Habit> source) {
+		if (source.isEmpty()) return List.of();
+		List<String> ids = source.stream().map(Habit::getId).toList();
+		Map<String, List<HabitSchedule>> schedulesByHabit = new LinkedHashMap<>();
+		for (HabitSchedule item : habitSchedules.findAllByHabitIdInOrderByHabitIdAscEffectiveFromAsc(ids))
+			schedulesByHabit.computeIfAbsent(item.getHabitId(), ignored -> new ArrayList<>()).add(item);
+		Map<String, List<HabitPause>> pausesByHabit = new LinkedHashMap<>();
+		for (HabitPause item : habitPauses.findAllByHabitIdInOrderByHabitIdAscPausedOnAsc(ids))
+			pausesByHabit.computeIfAbsent(item.getHabitId(), ignored -> new ArrayList<>()).add(item);
+		Map<String, List<HabitCheckIn>> checkInsByHabit = new LinkedHashMap<>();
+		for (HabitCheckIn item : habitCheckIns.findAllByHabitIdInOrderByHabitIdAscCheckinDateAsc(ids))
+			checkInsByHabit.computeIfAbsent(item.getHabitId(), ignored -> new ArrayList<>()).add(item);
+		return source.stream().map(habit -> new BackupHabit(habit.getId(), habit.getName(), habit.getStartDate(),
+			habit.getCreatedAt().truncatedTo(ChronoUnit.MICROS), habit.getUpdatedAt().truncatedTo(ChronoUnit.MICROS),
+			schedulesByHabit.getOrDefault(habit.getId(), List.of()).stream()
+				.map(item -> new BackupHabitSchedule(item.getEffectiveFrom(), item.getWeekdaysMask())).toList(),
+			pausesByHabit.getOrDefault(habit.getId(), List.of()).stream()
+				.map(item -> new BackupHabitPause(item.getPausedOn(), item.getResumedOn())).toList(),
+			checkInsByHabit.getOrDefault(habit.getId(), List.of()).stream().map(HabitCheckIn::getCheckinDate).toList())).toList();
 	}
 
 	private List<ReadingItem> loadReadingItemsWithTags(List<ReadingItem> source) {
@@ -764,6 +1342,16 @@ public class TaskBackupService {
 
 	private TaskSeries restoreSeries(BackupSeries item) {
 		return TaskSeries.restore(item.id(), item.title(), item.startDate(), item.dueTime(), item.occurrenceCount(), item.timeZoneId(), item.ended());
+	}
+
+	private Habit restoreHabit(BackupHabit item) {
+		return Habit.restore(item.id(), item.name(), item.startDate(), item.createdAt(), item.updatedAt());
+	}
+
+	private HabitPause restorePause(String habitId, BackupHabitPause item) {
+		HabitPause pause = new HabitPause(habitId, item.pausedOn());
+		if (item.resumedOn() != null) pause.resume(item.resumedOn());
+		return pause;
 	}
 
 	private ReadingItem restoreReadingItem(BackupReadingItem item, String coverImageName, String coverImageSha256) {
@@ -858,10 +1446,10 @@ public class TaskBackupService {
 		} catch (IOException ignored) { }
 	}
 
-	private void cleanupImportedCoversOnRollback(List<String> names) {
+	private void cleanupImportedCoversOnRollback(String ownerId, List<String> names) {
 		TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
 			@Override public void afterCompletion(int status) {
-				if (status != STATUS_COMMITTED) names.forEach(covers::delete);
+				if (status != STATUS_COMMITTED) names.forEach(name -> covers.delete(ownerId, name));
 			}
 		});
 	}
@@ -881,7 +1469,10 @@ public class TaskBackupService {
 
 	private record DecodedBackup(BackupFile file, String digest, Map<String, BackupTask> uniqueTasks,
 		Set<String> internalConflicts, int repeatedIdenticalIds, Map<String, BackupReadingItem> uniqueReadingItems,
-		Set<String> internalReadingConflicts, int repeatedIdenticalReadingIds, Map<String, Path> coverAssets, Path staging) {
+		Set<String> internalReadingConflicts, int repeatedIdenticalReadingIds, Map<String, BackupHabit> uniqueHabits,
+		Set<String> internalHabitConflicts, int repeatedIdenticalHabitIds, Map<String, BackupFocusSession> uniqueFocusSessions,
+		Set<String> internalFocusConflicts, int repeatedIdenticalFocusIds, Map<String, BackupNote> uniqueNotes,
+		Set<String> internalNoteConflicts, int repeatedIdenticalNoteIds, Map<String, Path> coverAssets, Path staging) {
 		private void cleanup() { deleteTree(staging); }
 	}
 

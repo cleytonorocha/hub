@@ -9,18 +9,21 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 @RestController
 @RequestMapping("/api/settings/tasks")
-public final class TaskSettingsController {
+public class TaskSettingsController {
 	private final GoogleTasksService tasks;
 
 	public TaskSettingsController(GoogleTasksService tasks) { this.tasks = tasks; }
 
 	@GetMapping
+	@PreAuthorize("hasAuthority('SETTINGS_READ')")
 	public ReminderSettings get() { return tasks.reminderSettings(); }
 
 	@PutMapping
+	@PreAuthorize("hasAuthority('SETTINGS_WRITE')")
 	public ReminderSettings save(@Valid @RequestBody ReminderTimeRequest request) {
 		return tasks.saveReminderSettings(request.reminderTime());
 	}

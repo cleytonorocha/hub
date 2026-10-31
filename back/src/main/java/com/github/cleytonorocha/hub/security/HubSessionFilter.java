@@ -22,6 +22,12 @@ public class HubSessionFilter extends OncePerRequestFilter {
 	private final AuthOwnershipMigration ownershipMigration;
 	public HubSessionFilter(HubUserRepository users, PermissionProfileRepository profiles, AuthOwnershipMigration ownershipMigration) { this.users = users; this.profiles = profiles; this.ownershipMigration = ownershipMigration; }
 	@Override protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain) throws ServletException, IOException {
+		String path = request.getRequestURI();
+		boolean setupRoute = path.equals("/api/auth/csrf") || path.equals("/api/auth/setup-state") || path.equals("/api/auth/setup");
+		if (path.startsWith("/api/") && !setupRoute && !ownershipMigration.isReady()) {
+			response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE, "A migração da base precisa ser concluída.");
+			return;
+		}
 		Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
 		if (authentication != null && authentication.getPrincipal() instanceof HubPrincipal principal) {
 			if (!ownershipMigration.isReady()) { response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE); return; }

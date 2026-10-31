@@ -35,20 +35,20 @@ public class ReadingCoverStorageService {
 	private final Path root;
 
 	public ReadingCoverStorageService(@Value("${hub.media.root}") String root) {
-		this.root = Path.of(root).toAbsolutePath().normalize().resolve("reading-library").resolve("covers").normalize();
+		this.root = Path.of(root).toAbsolutePath().normalize();
 	}
 
-	public StoredCover store(MultipartFile upload) {
+	public StoredCover store(String ownerId, MultipartFile upload) {
 		if (upload == null || upload.isEmpty()) throw invalid("Escolha uma imagem JPEG ou PNG.");
 		if (upload.getSize() > MAX_FILE_BYTES) throw invalid("A imagem pode ter até 8 MiB.");
 		try {
-			return store(upload.getBytes());
+			return store(ownerId, upload.getBytes());
 		} catch (IOException error) {
 			throw new CoverStorageException("Não foi possível ler a imagem enviada.", error);
 		}
 	}
 
-	public StoredCover store(byte[] bytes) {
+	public StoredCover store(String ownerId, byte[] bytes) {
 		if (bytes == null || bytes.length == 0) throw invalid("Escolha uma imagem JPEG ou PNG.");
 		if (bytes.length > MAX_FILE_BYTES) throw invalid("A imagem pode ter até 8 MiB.");
 		DecodedImage decoded = decode(bytes);
@@ -57,10 +57,10 @@ public class ReadingCoverStorageService {
 		byte[] normalized = encode(original, decoded.format());
 		byte[] thumb = encode(thumbnail, decoded.format());
 		String name = UUID.randomUUID() + "." + (decoded.format().equals("png") ? "png" : "jpg");
-		return write(name, normalized, thumb);
+		return write(ownerId, name, normalized, thumb);
 	}
 
-	public StoredCover storePortable(byte[] bytes, String expectedFormat) {
+	public StoredCover storePortable(String ownerId, byte[] bytes, String expectedFormat) {
 		if (bytes == null || bytes.length == 0 || bytes.length > MAX_FILE_BYTES) throw invalid("Uma imagem da cópia excede 8 MiB.");
 		DecodedImage decoded = decode(bytes);
 		String format = decoded.format().equals("png") ? "png" : "jpg";
@@ -68,7 +68,7 @@ public class ReadingCoverStorageService {
 			throw invalid("Uma imagem do pacote não está no formato de capa esperado.");
 		}
 		String name = UUID.randomUUID() + "." + format;
-		return write(name, bytes, encode(resize(decoded.image(), MAX_THUMBNAIL_EDGE), decoded.format()));
+		return write(ownerId, name, bytes, encode(resize(decoded.image(), MAX_THUMBNAIL_EDGE), decoded.format()));
 	}
 
 	public String validate(byte[] bytes) {
@@ -76,9 +76,9 @@ public class ReadingCoverStorageService {
 		return decoded.format().equals("png") ? "png" : "jpg";
 	}
 
-	public byte[] read(String name, boolean thumbnail) {
+	public byte[] read(String ownerId, String name, boolean thumbnail) {
 		try {
-			Path path = thumbnail ? thumbnailPathFor(name) : pathFor(name);
+			Path path = thumbnail ? thumbnailPathFor(ownerId, name) : pathFor(ownerId, name);
 			if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS) || Files.size(path) > MAX_FILE_BYTES) throw new CoverNotFoundException();
 			return Files.readAllBytes(path);
 		} catch (IOException error) {
@@ -90,19 +90,19 @@ public class ReadingCoverStorageService {
 		return name != null && name.toLowerCase(Locale.ROOT).endsWith(".png") ? MediaType.IMAGE_PNG : MediaType.IMAGE_JPEG;
 	}
 
-	public long size(String name) throws IOException {
-		Path path = pathFor(name);
+	public long size(String ownerId, String name) throws IOException {
+		Path path = pathFor(ownerId, name);
 		if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) throw new CoverNotFoundException();
 		long size = Files.size(path);
 		if (size < 1 || size > MAX_FILE_BYTES) throw new CoverNotFoundException();
 		return size;
 	}
 
-	public void delete(String name) {
+	public void delete(String ownerId, String name) {
 		if (name == null) return;
 		try {
-			Files.deleteIfExists(pathFor(name));
-			Files.deleteIfExists(thumbnailPathFor(name));
+			Files.deleteIfExists(pathFor(ownerId, name));
+			Files.deleteIfExists(thumbnailPathFor(ownerId, name));
 		} catch (IOException error) {
 			throw new CoverStorageException("Não foi possível remover a imagem substituída.", error);
 		}
@@ -162,14 +162,14 @@ public class ReadingCoverStorageService {
 		}
 	}
 
-	private StoredCover write(String name, byte[] image, byte[] thumbnail) {
+	private StoredCover write(String ownerId, String name, byte[] image, byte[] thumbnail) {
 		try {
-			Files.createDirectories(root);
-			writeAtomically(pathFor(name), image);
-			writeAtomically(thumbnailPathFor(name), thumbnail);
+			Files.createDirectories(ownerRoot(ownerId));
+			writeAtomically(pathFor(ownerId, name), image);
+			writeAtomically(thumbnailPathFor(ownerId, name), thumbnail);
 			return new StoredCover(name, mediaType(name), sha256(image));
 		} catch (IOException error) {
-			delete(name);
+			delete(ownerId, name);
 			throw new CoverStorageException("Não foi possível armazenar a imagem.", error);
 		}
 	}
@@ -180,7 +180,7 @@ public class ReadingCoverStorageService {
 	}
 
 	private void writeAtomically(Path target, byte[] bytes) throws IOException {
-		Path temporary = Files.createTempFile(root, ".cover-", ".tmp");
+		Path temporary = Files.createTempFile(target.getParent(), ".cover-", ".tmp");
 		try {
 			Files.write(temporary, bytes);
 			try { Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE); }
@@ -190,16 +190,24 @@ public class ReadingCoverStorageService {
 		}
 	}
 
-	private Path pathFor(String name) {
-		if (name == null || !name.matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.(jpg|png)")) throw new CoverNotFoundException();
-		Path path = root.resolve(name).normalize();
-		if (!path.startsWith(root)) throw new CoverNotFoundException();
+	private Path ownerRoot(String ownerId) {
+		if (ownerId == null || !ownerId.matches("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")) throw new CoverNotFoundException();
+		Path path = root.resolve("users").resolve(ownerId.toLowerCase(Locale.ROOT)).resolve("reading-library").resolve("covers").normalize();
+		if (!path.startsWith(root.resolve("users").normalize())) throw new CoverNotFoundException();
 		return path;
 	}
 
-	private Path thumbnailPathFor(String name) {
-		Path source = pathFor(name);
-		return root.resolve(source.getFileName().toString().replaceFirst("\\.(jpg|png)$", ".thumb.$1")).normalize();
+	private Path pathFor(String ownerId, String name) {
+		if (name == null || !name.matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.(jpg|png)")) throw new CoverNotFoundException();
+		Path ownerRoot = ownerRoot(ownerId);
+		Path path = ownerRoot.resolve(name).normalize();
+		if (!path.startsWith(ownerRoot)) throw new CoverNotFoundException();
+		return path;
+	}
+
+	private Path thumbnailPathFor(String ownerId, String name) {
+		Path source = pathFor(ownerId, name);
+		return source.getParent().resolve(source.getFileName().toString().replaceFirst("\\.(jpg|png)$", ".thumb.$1")).normalize();
 	}
 
 	private static CoverValidationException invalid(String message) { return new CoverValidationException(message); }

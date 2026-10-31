@@ -2,7 +2,7 @@
 
 Aplicação web para organizar tarefas pessoais em um calendário, acompanhar prazos e personalizar a forma de visualizar cada período.
 
-> **Status:** tarefas locais e calendário estão disponíveis. A integração com Google Tasks está pausada. A tela de baixar vídeos é apenas uma interface; ela não inicia downloads.
+> **Status:** tarefas locais, calendário, biblioteca de leitura, downloads de vídeos e integração Google Tasks estão disponíveis. Google Tasks requer credenciais OAuth e uma chave de instalação fora do Git.
 
 ## Visão geral
 
@@ -54,8 +54,9 @@ Capturas atuais da aplicação no navegador (30/10/2026):
 - **Busca global:** no Calendário, encontre tasks por título, categoria ou observações e filtre por estado, prioridade e período, incluindo tasks sem data ou concluídas.
 - **Biblioteca de leitura:** organize livros, artigos e vídeos em fileiras por estado, na ordem **Em andamento**, **A ler** e **Concluído**. Cada fileira aparece somente quando há resultados. A busca aceita título, autor/origem e notas, com filtros por estado, tipo e autor e paginação no servidor. Livros podem ter capa local, etiquetas, notas e progresso por páginas; capas entram na cópia portátil.
 - **Notificações:** visão de tasks vencidas, para hoje e para amanhã.
+- **Google Tasks:** cada conta Hub pode conectar sua própria conta Google, escolher listas, sincronizar e editar tarefas e configurar avisos. O conteúdo de outra conta não fica disponível para administradores.
 - **Configurações:** resumo semanal, valores padrão para novas tasks e apresentação padrão de cada visualização do calendário.
-- **Baixar vídeos:** tela inicial com seleção de plataforma e validação local do formato e domínio do link. A integração de download ainda não está implementada.
+- **Baixar vídeos:** prepare um vídeo público individual do YouTube ou Instagram e receba o arquivo pelo gerenciador de downloads do navegador. Escolha 480p, 720p ou 1080p como qualidade preferida; quando só houver uma resolução maior, o Hub avisa e entrega uma versão original disponível, sem converter. O acesso depende da permissão de baixar vídeos.
 - **Layout adaptável:** navegação lateral que pode ser recolhida e interface ajustada para telas menores.
 
 ### Contas e permissões
@@ -64,7 +65,7 @@ Na primeira abertura, a instalação apresenta um assistente local para criar a 
 
 O login usa sessão do servidor, cookie HttpOnly, proteção CSRF e limite de tentativas. O Compose publica a interface e a API somente em `127.0.0.1`; o backend executado fora do Docker também usa bind local. **O primeiro setup sem token só está aprovado para esse acesso local. Não publique o app em LAN ou na internet**; uma implantação remota precisa desativar o setup aberto e definir um mecanismo administrativo de bootstrap seguro antes de expor a aplicação.
 
-A integração Google Tasks permanece indisponível nesta versão multiusuário porque o estado e as credenciais antigos ainda não têm isolamento funcional por conta. Os dados existentes são preservados e associados ao Administrador inicial.
+Os dados legados sem proprietário são associados ao primeiro Administrador. A conexão Google antiga `primary` permanece nessa conta. Cada nova conta Hub mantém seu próprio estado e credenciais do Google Tasks.
 
 ## Tecnologias
 
@@ -79,7 +80,7 @@ A integração Google Tasks permanece indisponível nesta versão multiusuário 
 
 - Node.js 22.12 ou superior
 - Java 25
-- yt-dlp e FFmpeg no `PATH` para executar o serviço de download fora do Docker
+- Para downloads fora do Docker: Python 3.11+, `yt-dlp[default]==2026.10.26`, FFmpeg/ffprobe e Node.js 22 ou superior no `PATH`
 - Docker Desktop ou Docker Engine com Docker Compose v2, para executar em containers
 
 O repositório inclui Maven Wrapper, então não é necessário instalar Maven separadamente.
@@ -112,7 +113,9 @@ npm run dev
 
 Abra <http://localhost:8081>. O Vite encaminha as chamadas `/api` para o backend em `127.0.0.1:8080`.
 
-O serviço de download usa o executável `yt-dlp` e o FFmpeg para reunir faixas de áudio e vídeo quando necessário. No backend local, configure `HUB_VIDEO_DOWNLOAD_YT_DLP_COMMAND` se o executável não estiver disponível como `yt-dlp`. A imagem Docker instala essas dependências.
+O Docker instala as dependências de download, incluindo yt-dlp 2026.10.26, EJS compatível, Node 22.23.4 e FFmpeg/ffprobe. Fora do Docker, instale essas ferramentas ou configure seus caminhos. A ausência de uma delas deixa apenas o downloader indisponível. Consulte [configuração, API e limites do downloader](docs/video-downloads.md).
+
+Para habilitar Google Tasks no Windows, configure `HUB_GOOGLE_OAUTH_CLIENT_ID`, `HUB_GOOGLE_CLIENT_SECRET_FILE` e `HUB_GOOGLE_CREDENTIAL_KEY_FILE` no ambiente do backend. O arquivo do segredo OAuth deve ser texto; a chave deve conter exatamente 32 bytes. Mantenha ambos fora do repositório. Registre no Google Cloud o URI de redirecionamento exato `http://localhost:8081/api/google-tasks/oauth/callback`.
 
 ## Executar com Docker Compose
 
@@ -126,24 +129,32 @@ Abra <http://localhost:8081>. O front é compilado e servido pelo Nginx, que enc
 
 Para personalizar as portas, copie `.env.example` para `.env` e altere `FRONTEND_PORT` ou `BACKEND_PORT`. Por padrão, as portas são publicadas somente em `127.0.0.1`.
 
+Para habilitar Google Tasks no Compose, configure `HUB_GOOGLE_OAUTH_CLIENT_ID` e os caminhos locais de `HUB_GOOGLE_CLIENT_SECRET_FILE` e `HUB_GOOGLE_CREDENTIAL_KEY_FILE` no `.env`. Crie os dois arquivos fora do Git; a chave deve conter exatamente 32 bytes. Suba a aplicação com o overlay de secrets, montados somente para leitura:
+
+```sh
+docker compose -f compose.yaml -f compose.google.yaml up --build -d
+```
+
+Registre no Google Cloud o URI de redirecionamento exato `http://localhost:8081/api/google-tasks/oauth/callback`. Sem os três segredos válidos, a integração permanece desabilitada.
+
 ```sh
 docker compose ps
 docker compose logs -f
 docker compose down
 ```
 
-`docker compose down` mantém os volumes `hub_data` e `hub_media`. O comando `docker compose down --volumes` apaga os dois, incluindo o banco e as imagens enviadas.
+`docker compose down` mantém o volume `hub_storage`. O comando `docker compose down --volumes` apaga o banco e as imagens armazenadas.
 
 ## Dados e privacidade
 
-- Sem Docker, o H2 fica em `%LOCALAPPDATA%\Hub\data` no Windows.
-- Com Docker, o H2 fica no volume nomeado `hub_data`. As imagens da Biblioteca de leitura ficam no volume separado `hub_media`, organizadas em `reading-library/covers`. Esses dados são independentes do arquivo local e não recebem os dados locais automaticamente.
-- Sem Docker, as imagens ficam em `%LOCALAPPDATA%\Hub\media\reading-library\covers`, fora do repositório.
-- Preferências de apresentação e de tasks ficam no `localStorage` do navegador.
+- Sem Docker, os dados ficam sob `%LOCALAPPDATA%\Hub`: H2 em `database\hub` e capas em `users\<ownerId>\reading-library\covers`.
+- Com Docker, o volume nomeado `hub_storage` monta em `/data`, com H2 em `/data/database/hub` e arquivos de cada usuário em `/data/users/<ownerId>`.
+- Preferências de interface são armazenadas por usuário na API. Valores antigos em `localStorage` namespaced por conta servem para a migração inicial e só são removidos depois da confirmação do servidor, sem alterações pendentes.
+- Vídeos preparados são temporários e isolados por conta. Não entram no banco, na cópia portátil ou no volume de capas; expiram após dez minutos sem iniciar a transferência e não são recuperados após reiniciar o backend.
 - A API local usa `127.0.0.1` por padrão; no Compose, as portas também são vinculadas apenas a `127.0.0.1`.
-- A chave OAuth atual usa Windows DPAPI. Por isso, a conexão Google não funciona no container Linux.
+- A chave OAuth é única para a instalação e deve ser preservada junto do H2. Em Compose, use o overlay opcional de secrets; no Windows, guarde o arquivo da chave fora do repositório.
 
-Antes de iniciar esta versão, pare o backend e faça uma cópia física consistente. Copie juntos banco e mídia: `%LOCALAPPDATA%\Hub\data` e `%LOCALAPPDATA%\Hub\media` sem Docker; `hub_data` e `hub_media` no Compose. A primeira conta executa a atribuição transacional dos registros antigos; após o commit, uma migração versionada aplica as restrições de propriedade. Se essa etapa não concluir, o backend bloqueia o login e os endpoints privados até a migração ser concluída. A cópia portátil exportada pelo Hub inclui capas em um pacote ZIP de até 100 MiB; arquivos JSON antigos continuam importáveis, mas não contêm imagens. Não use `down --volumes` se quiser preservar banco e capas.
+Para migrar os volumes legados, use o procedimento offline em [docs/hub-storage-migration.md](docs/hub-storage-migration.md). Ele exige backend parado e backup byte a byte verificado, escreve apenas em um destino novo e não executa cutover. Mantenha `hub_data` e `hub_media` intactos até validar o novo armazenamento e completar a janela de rollback. OAuth client secret e chave de credenciais continuam externos e não são copiados pela migração. Se transferir um banco Windows com credencial Google antiga para Compose, configure primeiro a chave de instalação e o client secret no Windows, abra Google Tasks e faça uma sincronização para recriptografar o token legado com a chave nova. Sem a chave DPAPI antiga, será necessário reconectar a conta Google. A cópia portátil exportada pelo Hub inclui capas em um pacote ZIP de até 100 MiB; arquivos JSON antigos continuam importáveis, mas não contêm imagens.
 
 ## Estrutura do projeto
 

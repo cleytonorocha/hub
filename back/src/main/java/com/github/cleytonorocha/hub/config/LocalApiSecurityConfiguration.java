@@ -55,7 +55,6 @@ public class LocalApiSecurityConfiguration {
 			.authorizeHttpRequests(requests -> requests
 				.requestMatchers("/api/auth/csrf", "/api/auth/setup-state", "/api/auth/setup", "/api/auth/login").permitAll()
 				.requestMatchers("/api/auth/**").authenticated()
-				.requestMatchers("/api/google-tasks/**", "/api/settings/tasks/**").denyAll()
 				.requestMatchers("/api/**").authenticated()
 				.anyRequest().permitAll())
 			.build();
