@@ -24,6 +24,6 @@ public class UserAdministrationController {
 	@PostMapping("/users") @ResponseStatus(HttpStatus.CREATED) public AuthService.SessionView create(@Valid @RequestBody AuthService.CreateUserRequest request) { return auth.createUser(request); }
 	@PutMapping("/users/{id}") public AuthService.SessionView update(@PathVariable String id, @Valid @RequestBody AuthService.UpdateUserRequest request) { return auth.updateUser(id, request); }
 	@GetMapping("/profiles") public List<AuthService.ProfileView> profiles() { return auth.listProfiles(); }
-	@PostMapping("/profiles") @ResponseStatus(HttpStatus.CREATED) @PreAuthorize("hasAuthority('PROFILE_MANAGE')") public AuthService.ProfileView createProfile(@Valid @RequestBody AuthService.ProfileRequest request) { return auth.createProfile(request); }
-	@PutMapping("/profiles/{id}") @PreAuthorize("hasAuthority('PROFILE_MANAGE')") public AuthService.ProfileView updateProfile(@PathVariable String id, @Valid @RequestBody AuthService.ProfileRequest request) { return auth.updateProfile(id, request); }
+	@PostMapping("/profiles") @ResponseStatus(HttpStatus.CREATED) @PreAuthorize("hasAuthority('USER_MANAGE') and hasAuthority('PROFILE_MANAGE')") public AuthService.ProfileView createProfile(@Valid @RequestBody AuthService.ProfileRequest request) { return auth.createProfile(request); }
+	@PutMapping("/profiles/{id}") @PreAuthorize("hasAuthority('USER_MANAGE') and hasAuthority('PROFILE_MANAGE')") public AuthService.ProfileView updateProfile(@PathVariable String id, @Valid @RequestBody AuthService.ProfileRequest request) { return auth.updateProfile(id, request); }
 }

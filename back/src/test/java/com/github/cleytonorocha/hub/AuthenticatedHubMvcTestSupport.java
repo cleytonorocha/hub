@@ -111,10 +111,7 @@ abstract class AuthenticatedHubMvcTestSupport {
 			true, "test-profile", "Test profile", permissions);
 		return new HubAuthenticatedMvc(delegate, limitedActor,
 			() -> jdbc.update("UPDATE hub_user SET profile_id=? WHERE id=?", profileId, TEST_OWNER),
-			() -> {
-				jdbc.update("UPDATE hub_user SET profile_id=? WHERE id=?", previousProfile, TEST_OWNER);
-				jdbc.update("DELETE FROM hub_permission_profile WHERE id=?", profileId);
-			});
+			() -> jdbc.update("UPDATE hub_user SET profile_id=? WHERE id=?", previousProfile, TEST_OWNER));
 	}
 
 	protected HubAuthenticatedMvc mvcAsOwnerWithPermissions(String owner, String permissions) {

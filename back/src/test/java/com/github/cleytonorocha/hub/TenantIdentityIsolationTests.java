@@ -171,7 +171,7 @@ class TenantIdentityIsolationTests {
 		String checklistId = UUID.randomUUID().toString();
 		assertThatThrownBy(() -> ownerTransaction(sourceOwner, backups::exportPortableCopy))
 			.isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
-			.hasMessageContaining("leitura em todas as áreas");
+			.hasMessageContaining("Seu perfil não pode exportar ou importar uma cópia completa dos próprios dados.");
 		Path archive = ownerTransaction(sourceOwner, "TASK_READ,TASK_WRITE,READING_READ,HABITS_READ,FOCUS_READ,NOTES_READ", () -> {
 			TaskSeries localSeries = TaskSeries.restore(seriesId, "Series portátil", LocalDate.of(2026, 11, 1), null, 3, "UTC", false);
 			series.saveAndFlush(localSeries);

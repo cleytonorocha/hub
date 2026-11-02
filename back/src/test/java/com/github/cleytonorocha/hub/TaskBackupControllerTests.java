@@ -21,6 +21,7 @@ import com.github.cleytonorocha.hub.dto.TaskBackupDtos.BackupFocusSession;
 import com.github.cleytonorocha.hub.dto.TaskBackupDtos.BackupNote;
 import com.github.cleytonorocha.hub.entity.Task;
 import com.github.cleytonorocha.hub.controller.TaskBackupController;
+import com.github.cleytonorocha.hub.service.AuthOwnershipMigration;
 import com.github.cleytonorocha.hub.repository.TaskRepository;
 import com.github.cleytonorocha.hub.repository.ReadingItemRepository;
 import com.github.cleytonorocha.hub.service.PortableCopyArchiveCodec;
@@ -77,6 +78,7 @@ class TaskBackupControllerTests extends AuthenticatedHubMvcTestSupport {
 	@Autowired PortableCopyArchiveCodec archiveCodec;
 	@Autowired UserPreferenceService userPreferences;
 	@Autowired PlatformTransactionManager transactionManager;
+	@Autowired AuthOwnershipMigration ownershipMigration;
 	@MockitoSpyBean ReadingCoverStorageService covers;
 
 	@BeforeEach
@@ -246,6 +248,7 @@ class TaskBackupControllerTests extends AuthenticatedHubMvcTestSupport {
 		try {
 			MvcResult firstPreview = previewPackage(content);
 			mvc.perform(importPackageRequest(content, json(firstPreview).get("token").asText())).andExpect(status().isOk());
+			assertTaskTenantSchemaReady();
 			HubAuthenticatedMvc secondOwner = mvcAsOwnerWithPermissions(otherOwner, "PORTABLE_COPY");
 			MvcResult secondPreview = secondOwner.perform(post(BASE + "/preview").contentType("application/zip").content(content))
 				.andExpect(status().isOk()).andReturn();
@@ -1041,6 +1044,31 @@ class TaskBackupControllerTests extends AuthenticatedHubMvcTestSupport {
 	private String exportManifest() throws Exception {
 		return new String(unzip(exportPackage()).get("manifest.json"), java.nio.charset.StandardCharsets.UTF_8);
 	}
+
+	private void assertTaskTenantSchemaReady() {
+		MigrationDiagnostic diagnostic = new TransactionTemplate(transactionManager).execute(status -> {
+			String database = jdbc.queryForObject("SELECT CURRENT_CATALOG() || '/' || CURRENT_SCHEMA()", String.class);
+			List<String> primaryKey = jdbc.query("SELECT kcu.column_name FROM information_schema.table_constraints tc "
+				+ "JOIN information_schema.key_column_usage kcu ON tc.constraint_catalog=kcu.constraint_catalog "
+				+ "AND tc.constraint_schema=kcu.constraint_schema AND tc.constraint_name=kcu.constraint_name "
+				+ "AND kcu.table_schema=tc.table_schema AND kcu.table_name=tc.table_name "
+				+ "WHERE UPPER(tc.table_schema)=UPPER(CURRENT_SCHEMA()) AND UPPER(tc.table_name)='HUB_TASK' "
+				+ "AND tc.constraint_type='PRIMARY KEY' ORDER BY kcu.ordinal_position",
+				(rs, row) -> rs.getString(1), new Object[0]);
+			List<String> migrations = jdbc.query("SELECT migration_id FROM hub_schema_migration "
+				+ "WHERE migration_id IN (?, ?, ?) ORDER BY migration_id",
+				(rs, row) -> rs.getString(1), AuthOwnershipMigration.V1, AuthOwnershipMigration.V2, AuthOwnershipMigration.V3);
+			return new MigrationDiagnostic(database, primaryKey, migrations, ownershipMigration.isReady());
+		});
+		assertThat(diagnostic.primaryKey()).as("DB/schema=%s; migrations=%s; ready=%s",
+			diagnostic.database(), diagnostic.migrations(), diagnostic.ready()).containsExactly("OWNER_ID", "ID");
+		assertThat(diagnostic.migrations()).as("DB/schema=%s; PK=%s", diagnostic.database(), diagnostic.primaryKey())
+			.containsExactlyInAnyOrder(AuthOwnershipMigration.V1, AuthOwnershipMigration.V2, AuthOwnershipMigration.V3);
+		assertThat(diagnostic.ready()).as("DB/schema=%s; PK=%s; migrations=%s",
+			diagnostic.database(), diagnostic.primaryKey(), diagnostic.migrations()).isTrue();
+	}
+
+	private record MigrationDiagnostic(String database, List<String> primaryKey, List<String> migrations, boolean ready) {}
 
 	private byte[] exportPackage() throws Exception {
 		MvcResult started = mvc.perform(get(BASE + "/export"))
