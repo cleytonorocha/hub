@@ -138,6 +138,20 @@ class VideoDownloadControllerTests {
     }
 
     @Test
+    void acceptsTheRawCookieTokenUsedByTheFrontend() throws Exception {
+        MvcResult csrfResponse = mvc.perform(get("/api/auth/csrf")).andExpect(status().isOk()).andReturn();
+        String headerName = com.jayway.jsonpath.JsonPath.read(csrfResponse.getResponse().getContentAsString(), "$.headerName");
+        Cookie cookie = csrfResponse.getResponse().getCookie("XSRF-TOKEN");
+        assertThat(cookie).isNotNull();
+        when(downloads.create(eq(actor.id()), any())).thenReturn(new VideoDownloadService.Created("raw-token-job", VideoDownloadService.State.RUNNING, "/api/video-downloads/raw-token-job"));
+
+        mvc.perform(post("/api/video-downloads").with(signedIn(actor)).cookie(cookie).header(headerName, cookie.getValue())
+                .contentType(MediaType.APPLICATION_JSON).content(BODY))
+            .andExpect(status().isAccepted()).andExpect(jsonPath("$.id").value("raw-token-job"));
+        verify(downloads).create(eq(actor.id()), any());
+    }
+
+    @Test
     void createsAsynchronouslyUsingTheExplicitCsrfJsonTokenAndDefaultsTo720() throws Exception {
         MvcResult csrfResponse = mvc.perform(get("/api/auth/csrf")).andExpect(status().isOk()).andReturn();
         String token = com.jayway.jsonpath.JsonPath.read(csrfResponse.getResponse().getContentAsString(), "$.token");

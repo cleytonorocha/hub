@@ -92,7 +92,19 @@ class HabitControllerTests extends AuthenticatedHubMvcTestSupport {
 		JsonNode paused = week(monday);
 		assertThat(paused.get("completed").asInt()).isEqualTo(1);
 		assertThat(paused.get("eligible").asInt()).isEqualTo(1);
-		assertThat(paused.get("habits").get(0).get("days").findValues("status").stream().map(JsonNode::asText).toList()).contains("DONE", "PAUSED");
+		JsonNode pausedHabit = paused.get("habits").get(0);
+		assertThat(pausedHabit.get("paused").asBoolean()).isTrue();
+		List<String> pausedStatuses = pausedHabit.get("days").findValues("status").stream().map(JsonNode::asText).toList();
+		assertThat(pausedStatuses).contains("DONE");
+		if (today.isBefore(monday.plusDays(6))) assertThat(pausedStatuses).contains("PAUSED");
+		else assertThat(pausedStatuses).doesNotContain("PAUSED");
+		for (int day = 0; day < 7; day++) {
+			LocalDate date = monday.plusDays(day);
+			if (date.isBefore(today)) {
+				assertThat(pausedHabit.get("days").get(day).get("status").asText())
+					.isEqualTo(afterEdit.get("days").get(day).get("status").asText());
+			}
+		}
 
 		delegate.perform(delete(API + "/" + id + "/check-ins/" + today + "?timeZoneId=UTC").with(csrf()))
 			.andExpect(status().isOk());

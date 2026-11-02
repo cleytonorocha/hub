@@ -82,7 +82,7 @@ export function videoStatusMessage(job, deliveryRequested = false) {
   switch (job?.state) {
     case 'RUNNING': return 'Preparando vídeo. Isso pode levar alguns minutos.'
     case 'READY': return deliveryRequested ? 'Download enviado ao navegador. Acompanhe na lista de downloads.' : 'Vídeo pronto para baixar.'
-    case 'TRANSFERRING': return ''
+    case 'TRANSFERRING': return deliveryRequested ? 'Download enviado ao navegador. O envio está em andamento.' : 'Enviando o download ao navegador.'
     case 'COMPLETED': return 'Transferência concluída e enviada ao navegador.'
     case 'CANCELLED': return 'Download cancelado.'
     case 'EXPIRED': return 'Este arquivo expirou. Prepare o vídeo novamente.'
